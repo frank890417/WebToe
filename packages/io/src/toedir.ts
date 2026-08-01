@@ -62,6 +62,7 @@ const TYPE_MAP: Record<string, string> = {
   'TOP:math': 'top:math',
   'TOP:reorder': 'top:reorder',
   'TOP:flip': 'top:flip',
+  'TOP:lookup': 'top:lookup',
   'CHOP:in': 'chop:in',
   'CHOP:out': 'chop:out',
   'CHOP:switch': 'chop:switch',
@@ -200,6 +201,11 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
   'TOP:ramp': {
     type: { to: 'type', menu: { horz: 'linear', vert: 'linear', radial: 'radial', circular: 'circular' } },
     phase: { to: 'phase' },
+    dat: { to: 'dat' },
+    color1: { toColor: 'colorb', channel: 0 },
+    color2: { toColor: 'colorb', channel: 1 },
+    color3: { toColor: 'colorb', channel: 2 },
+    color4: { toColor: 'colorb', channel: 3 },
   },
   'TOP:constant': {
     colorr: { toColor: 'color', channel: 0 },

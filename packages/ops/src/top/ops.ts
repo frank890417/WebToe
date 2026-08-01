@@ -126,6 +126,7 @@ export const topOps: OpSpec[] = [
       { key: 'phase', type: 'float', default: 0, min: 0, max: 1 },
       { key: 'colora', type: 'color', default: [0, 0, 0, 1] },
       { key: 'colorb', type: 'color', default: [1, 1, 1, 1] },
+      { key: 'dat', label: 'keys DAT (pos r g b a)', type: 'string', default: '' },
       ...resParams('custom'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -134,6 +135,32 @@ export const topOps: OpSpec[] = [
       if (!requireGpu(ctx)) return null;
       ensureShader(ctx, this);
       const { w, h } = resolution(ctx, null);
+
+      // TouchDesigner keeps a ramp's real gradient in a keys DAT with
+      // `pos r g b a` rows; the colour params are only the first key. Reading
+      // it is the difference between a grey wash and the artwork's palette.
+      const pos = new Array(8).fill(0);
+      const cr = new Array(8).fill(0), cg = new Array(8).fill(0);
+      const cb = new Array(8).fill(0), ca = new Array(8).fill(1);
+      let stops = 0;
+      const datPath = ctx.paramStr('dat');
+      if (datPath) {
+        const dat = ctx.engine.graph.resolve(datPath, ctx.node.parent ?? ctx.node);
+        const text = dat?.text ?? '';
+        if (text) {
+          const rows = text.trim().split('\n').map((r) => r.split('\t'));
+          const body = rows.length && /pos/i.test(rows[0][0] ?? '') ? rows.slice(1) : rows;
+          for (const r of body) {
+            if (stops >= 8 || r.length < 5) continue;
+            const v = r.map(Number);
+            if (v.some((x) => !Number.isFinite(x))) continue;
+            pos[stops] = v[0];
+            cr[stops] = v[1]; cg[stops] = v[2]; cb[stops] = v[3]; ca[stops] = v[4];
+            stops++;
+          }
+        }
+      }
+
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
         uniforms: {
@@ -141,6 +168,9 @@ export const topOps: OpSpec[] = [
           u_phase: ctx.paramNum('phase'),
           u_colora: ctx.param('colora') as number[],
           u_colorb: ctx.param('colorb') as number[],
+          u_stopCount: stops,
+          u_stopPos: pos,
+          u_stopR: cr, u_stopG: cg, u_stopB: cb, u_stopA: ca,
         },
         inputs: [],
         output: { width: w, height: h },
@@ -430,6 +460,46 @@ export const topOps: OpSpec[] = [
           u_offset: [ctx.paramNum('offsetx'), ctx.paramNum('offsety')],
         },
         inputs: [src.tex, map.tex],
+        output: { width: w, height: h },
+      });
+      return { kind: 'top', tex };
+    },
+  },
+
+  {
+    /**
+     * Lookup TOP — remaps an image through a ramp: the source's brightness
+     * becomes a horizontal coordinate into the second input. This is how a
+     * monochrome render becomes a colour-graded one in TouchDesigner, and it
+     * is what gives most point-cloud pieces their palette.
+     */
+    type: 'top:lookup',
+    family: F,
+    label: 'lookup',
+    inputs: { min: 2, max: 2 },
+    inputLabels: ['source image', 'lookup ramp (sampled across its width)'],
+    params: [
+      { key: 'source', type: 'menu', default: 'luminance', menu: ['luminance', 'red', 'alpha'] },
+      { key: 'offset', type: 'float', default: 0, min: -1, max: 1 },
+      ...resParams('input'),
+    ],
+    backends: ['webgl2'],
+    shaders: { glsl: glsl.lookupGlsl },
+    cook(ctx) {
+      if (!requireGpu(ctx)) return null;
+      ensureShader(ctx, this);
+      const src = asTop(ctx.inputs[0]);
+      const ramp = asTop(ctx.inputs[1]);
+      if (!src || !ramp) return placeholder(ctx, [0.2, 0.2, 0.4, 1]);
+      const { w, h } = resolution(ctx, src.tex);
+      const mode = ctx.paramStr('source');
+      const tex = ctx.gpu!.runPass(ctx.node, {
+        shaderId: this.type,
+        uniforms: {
+          u_offset: ctx.paramNum('offset'),
+          u_source: mode === 'red' ? 1 : mode === 'alpha' ? 2 : 0,
+        },
+        inputs: [src.tex, ramp.tex],
         output: { width: w, height: h },
       });
       return { kind: 'top', tex };

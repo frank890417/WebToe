@@ -82,6 +82,17 @@ uniform float u_type;
 uniform float u_phase;
 uniform vec4 u_colora;
 uniform vec4 u_colorb;
+// Multi-stop gradient from a TouchDesigner keys DAT. u_stopCount == 0 falls
+// back to the simple two-colour ramp, so hand-built patches are unaffected.
+// Separate float arrays on purpose: the backend's generic uniform setter maps
+// number[] of length 2/3/4 to vecN and anything else to uniform1fv, so a
+// vec4[8] would be uploaded wrongly. Four float[8] arrays always work.
+uniform float u_stopCount;
+uniform float u_stopPos[8];
+uniform float u_stopR[8];
+uniform float u_stopG[8];
+uniform float u_stopB[8];
+uniform float u_stopA[8];
 void main() {
   float t;
   if (u_type < 0.5) {
@@ -92,7 +103,23 @@ void main() {
     t = atan(v_uv.y - 0.5, v_uv.x - 0.5) / 6.28318530718 + 0.5;
   }
   t = fract(t + u_phase);
-  fragColor = mix(u_colora, u_colorb, t);
+  if (u_stopCount > 0.5) {
+    int n = int(u_stopCount);
+    vec4 c = vec4(u_stopR[0], u_stopG[0], u_stopB[0], u_stopA[0]);
+    for (int i = 0; i < 7; i++) {
+      if (i + 1 >= n) break;
+      float a = u_stopPos[i], b = u_stopPos[i + 1];
+      if (t >= a) {
+        float f = clamp((t - a) / max(b - a, 1e-5), 0.0, 1.0);
+        vec4 c0 = vec4(u_stopR[i], u_stopG[i], u_stopB[i], u_stopA[i]);
+        vec4 c1 = vec4(u_stopR[i + 1], u_stopG[i + 1], u_stopB[i + 1], u_stopA[i + 1]);
+        c = mix(c0, c1, f);
+      }
+    }
+    fragColor = c;
+  } else {
+    fragColor = mix(u_colora, u_colorb, t);
+  }
 }
 `;
 
@@ -262,6 +289,22 @@ uniform vec2 u_offset;
 void main() {
   vec2 d = (texture(u_tex1, v_uv).rg - 0.5) * u_weight + u_offset;
   fragColor = texture(u_tex0, clamp(v_uv + d, 0.0, 1.0));
+}
+`;
+
+export const lookupGlsl = `${PRE}
+uniform sampler2D u_tex0;   // source
+uniform sampler2D u_tex1;   // lookup ramp (sampled across its width)
+uniform float u_offset;
+uniform int u_source;       // 0 = luminance, 1 = red, 2 = alpha
+void main() {
+  vec4 src = texture(u_tex0, v_uv);
+  float i = u_source == 1 ? src.r
+          : u_source == 2 ? src.a
+          : dot(src.rgb, vec3(0.299, 0.587, 0.114));
+  float u = clamp(i + u_offset, 0.0, 1.0);
+  vec4 c = texture(u_tex1, vec2(u, 0.5));
+  fragColor = vec4(c.rgb, c.a * src.a);
 }
 `;
 
