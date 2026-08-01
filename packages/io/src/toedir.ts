@@ -340,7 +340,8 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     linenearcolorb: { toColor: 'color', channel: 2 },
     linenearcolora: { toColor: 'color', channel: 3 },
   },
-  'MAT:pointsprite': { pointsize: { to: 'pointsize' } },
+  // TD's token is `pointscale`; `pointsize` kept for hand-authored expansions
+  'MAT:pointsprite': { pointscale: { to: 'pointsize' }, pointsize: { to: 'pointsize' } },
   'MAT:constant': {
     colorr: { toColor: 'color', channel: 0 },
     colorg: { toColor: 'color', channel: 1 },
