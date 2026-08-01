@@ -40,7 +40,9 @@ const CSS = `
 .wt-crumb span:hover { color: #fff; text-decoration: underline; }
 .wt-hint { position: absolute; right: 12px; top: 8px; z-index: 20; color: #6a6a73; font-size: 11px; user-select: none; }
 
-.wt-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.wt-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; z-index: 1; }
+.wt-backdrop { position: absolute; inset: 0; width: 100%; height: 100%;
+  z-index: 0; pointer-events: none; }
 .wt-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .wt-wires path { fill: none; stroke: #8f8f9a; stroke-width: 1.6; opacity: 0.85; }
 .wt-wires path.wt-preview { stroke: #ffd166; stroke-dasharray: 5 4; }

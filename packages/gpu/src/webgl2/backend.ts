@@ -246,6 +246,8 @@ export class WebGL2Backend implements GpuFacade {
     gl.bindTexture(gl.TEXTURE_2D, this.textures.get(tex.id) ?? null);
     const loc = this.loc(prog, 'u_tex0');
     if (loc) gl.uniform1i(loc, 0);
+    const oloc = this.loc(prog, 'u_opacity');
+    if (oloc) gl.uniform1f(oloc, 1);   // uniforms default to 0 — readbacks would be black
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     const out = new Uint8Array(w * h * 4);
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);

@@ -38,6 +38,12 @@ export class EditorApp {
   /** TD-style: paint the current output behind the network, full strength. */
   private backdrop = true;
   private bgBtn!: HTMLButtonElement;
+  /** Backdrop lives on its own canvas *under* the nodes. The GL compositor is
+   *  above the node DOM (that is how thumbs paint), so it cannot be used here. */
+  private backdropEl!: HTMLCanvasElement;
+  private backdropCtx!: CanvasRenderingContext2D | null;
+  private backdropSrc = document.createElement('canvas');
+  private backdropTick = 0;
 
   constructor(private readonly host: HTMLElement, private readonly opts: EditorOptions = {}) {}
 
@@ -130,6 +136,11 @@ export class EditorApp {
     this.compositor = document.createElement('canvas');
     this.compositor.className = 'wt-compositor';
     root.appendChild(this.compositor);
+
+    this.backdropEl = document.createElement('canvas');
+    this.backdropEl.className = 'wt-backdrop';
+    net.insertBefore(this.backdropEl, net.firstChild);   // first child = painted first = behind
+    this.backdropCtx = this.backdropEl.getContext('2d');
 
     this.viewer = new Viewer(viewerEl, this.engine);
     this.params = new ParamPanel(paramsEl, this.engine, () => { /* params are read live */ });
@@ -226,6 +237,52 @@ export class EditorApp {
     };
     walk(this.engine.graph.root);
     if (this.viewer.target) this.engine.liveRoots.add(this.viewer.target);
+  }
+
+  /**
+   * TouchDesigner-style backdrop: the current output behind the whole network.
+   * Uses a CPU readback at a low rate (a few Hz) — cheap at this size, and the
+   * only way to get pixels *underneath* the node DOM.
+   */
+  private paintBackdrop(
+    target: NodeInst | null,
+    texFor: (n: NodeInst, o: import('@webtoe/core').OpOutput) => import('@webtoe/core').TextureHandle | null,
+  ): void {
+    const ctx = this.backdropCtx;
+    if (!ctx) return;
+    const el = this.backdropEl;
+    const w = this.netEl.clientWidth, h = this.netEl.clientHeight;
+    if (w < 2 || h < 2) return;
+    if (el.width !== w || el.height !== h) { el.width = w; el.height = h; }
+
+    if (!this.backdrop || !target?.output || !['top', 'sop', 'obj'].includes(target.output.kind)) {
+      ctx.clearRect(0, 0, w, h);
+      return;
+    }
+    if (this.backdropTick++ % 6) return;          // ~10 Hz is plenty for a backdrop
+
+    const tex = texFor(target, target.output);
+    if (!tex) { ctx.clearRect(0, 0, w, h); return; }
+    const sw = 320, sh = Math.max(1, Math.round(sw * (tex.height / Math.max(1, tex.width))));
+    let px: Uint8ClampedArray;
+    try { px = this.engine.gpu!.readPixels(tex, sw, sh); } catch { return; }
+
+    // GL readback is bottom-up — flip rows into the scratch canvas
+    const src = this.backdropSrc;
+    if (src.width !== sw || src.height !== sh) { src.width = sw; src.height = sh; }
+    const sctx = src.getContext('2d');
+    if (!sctx) return;
+    const img = sctx.createImageData(sw, sh);
+    const stride = sw * 4;
+    for (let y = 0; y < sh; y++) img.data.set(px.subarray((sh - 1 - y) * stride, (sh - y) * stride), y * stride);
+    sctx.putImageData(img, 0, 0);
+
+    // cover-fit into the network panel
+    const scale = Math.max(w / sw, h / sh);
+    const dw = sw * scale, dh = sh * scale;
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(src, (w - dw) / 2, (h - dh) / 2, dw, dh);
   }
 
   /** `d` and the toolbar button share this. */
@@ -462,17 +519,12 @@ export class EditorApp {
       if (tex) gpu.blitToCanvas(tex, rel(this.viewer.el.getBoundingClientRect()));
     }
 
+    this.paintBackdrop(vTarget, cachedTexFor);
+
     // live node previews at full frame rate, clipped to the network panel
     if (gpu) {
       const netClip = rel(this.netEl.getBoundingClientRect());
 
-      // TouchDesigner-style backdrop: the current output painted faintly across
-      // the whole network area, behind the nodes (the compositor canvas sits
-      // under the node DOM, so ordering is free). Dimmed so wires stay legible.
-      if (this.backdrop && vTarget?.output && ['top', 'sop', 'obj'].includes(vTarget.output.kind)) {
-        const tex = cachedTexFor(vTarget, vTarget.output);
-        if (tex) gpu.blitToCanvas(tex, { ...netClip, clip: netClip, opacity: 1, fit: 'cover' });
-      }
       for (const { node, el } of this.network.thumbTargets()) {
         const out = this.engine.cook(node);
         const tex = out ? cachedTexFor(node, out) : null;
