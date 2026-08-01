@@ -213,11 +213,24 @@ Measured: 108 nodes, **78% runnable**, 4200 live instances, 234 files decoded
 in-browser in ~3 ms, and the output matches the reference render's palette
 (black → deep blue → teal → green → orange → pale blue).
 
+Follow-ups from that session, now also done:
+
+- **Per-instance scale** — the instance buffer packs translate+colour+scale
+  (stride 40) behind a new vertex attribute; point sprites take their size from
+  it, which is how CHOP-driven rigs vary dot size.
+- **Hold-last channel semantics** — a channel shorter than the instance count
+  holds its last sample, as TD does. This is what lets a single-sample channel
+  drive every instance (the DNA sketch feeds `chan1` to both scale and colour
+  for all 4200); previously every instance after the first silently got 1.
+- **`pointscale`** — the Point Sprite MAT's size token is `pointscale`, not
+  `pointsize`, so real projects had been importing default-sized sprites.
+
 ### NEXT
 
-- Per-instance **scale** (`instancesx/sy/sz`): the renderer's instance buffer
-  packs translate+colour only; adding scale means a 4th vertex attribute.
-- `mat:pointsprite` point sizing, for dot-size variation.
+- **POP dynamics** (particle/force solvers). POPs import and their geometry ops
+  run; the simulation side is still stubbed. Deliberately deferred.
 - `SOP:filein` (external models) and `CHOP:audiospect` remain stubs — neither
   affects this sketch.
-- POPs: mapped for import, but the dynamics (particle/force) still stub.
+- WebGPU has no scene pass yet, so instancing is WebGL2-only.
+- The importer's `.toe` binary path (private) still degrades on very large
+  multi-segment projects; the bridge covers those.
