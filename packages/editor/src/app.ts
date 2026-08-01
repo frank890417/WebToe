@@ -1,7 +1,8 @@
 import { Engine, graphFromJSON, type Graph, type ImportReport, type NodeInst, VERSION } from '@webtoe/core';
 import { createBackend } from '@webtoe/gpu';
 import {
-  importFilesFromFileList, loadProjectFile, loadProjectUrl, saveProjectFile, toedirLoader,
+  DEFAULT_BRIDGE_URL, expandViaBridge, importFilesFromFileList, loadProjectFile, loadProjectUrl,
+  probeBridge, saveProjectFile, toedirLoader, type BridgeInfo, type ImportFile,
 } from '@webtoe/io';
 import { injectStyles } from './style';
 import { NetworkView } from './network';
@@ -32,6 +33,8 @@ export class EditorApp {
   private netEl!: HTMLDivElement;
   private compositor!: HTMLCanvasElement;
   private importLabel!: HTMLLabelElement;
+  /** Last known local bridge; null = not probed yet, false = probed and absent. */
+  private bridge: BridgeInfo | null | false = null;
 
   constructor(private readonly host: HTMLElement, private readonly opts: EditorOptions = {}) {}
 
@@ -58,7 +61,7 @@ export class EditorApp {
     const saveBtn = button('save', () => saveProjectFile(this.engine.graph, this.projName.value));
     const loadLabel = fileButton('load', '.json,.webtoe.json,.toe,.tox', async (file) => {
       if (/\.(toe|tox)$/i.test(file.name)) {
-        this.showToeGuide(file.name);
+        await this.openToeFile(file);
         return;
       }
       try {
@@ -217,18 +220,55 @@ export class EditorApp {
     if (this.viewer.target) this.engine.liveRoots.add(this.viewer.target);
   }
 
-  private async importExpansion(files: { path: string; text(): Promise<string> }[], name: string): Promise<void> {
+  private async importExpansion(
+    files: ImportFile[],
+    name: string,
+    extraNotes: string[] = [],
+  ): Promise<void> {
     if (!toedirLoader.canLoad(files)) {
       this.toast('that does not look like a toeexpand .toe.dir folder');
       return;
     }
     const { json, report } = await toedirLoader.load(files);
     this.adoptGraph(graphFromJSON(json), name);
-    this.showReport(report);
+    this.showReport({ ...report, notes: [...report.notes, ...extraNotes] });
   }
 
-  /** Drop targets: .webtoe.json loads, a .toe.dir folder imports, a raw .toe
-   *  opens the conversion guide (its binary container is proprietary). */
+  /**
+   * Open a raw `.toe`/`.tox` with no steps asked of the user.
+   *
+   * The container is proprietary and compressed, so the one operation only a
+   * TouchDesigner install can perform (`toeexpand`) is delegated to the local
+   * bridge. When the bridge is there this is a plain drop → graph. When it is
+   * not, the guide takes over and the app keeps every previous path working.
+   */
+  private async openToeFile(file: File): Promise<void> {
+    const name = file.name.replace(/\.(toe|tox)$/i, '');
+    if (this.bridge === null) this.bridge = (await probeBridge()) ?? false;
+    const info = this.bridge;
+    if (!info) { this.showToeGuide(file.name); return; }
+    if (!info.toeexpand) {
+      this.showToeGuide(file.name, 'the bridge is running but found no TouchDesigner install on this machine.');
+      return;
+    }
+
+    const done = this.stickyToast(`expanding ${file.name} with TouchDesigner…`);
+    try {
+      const exp = await expandViaBridge(file, info);
+      const notes = [`expanded locally in ${(exp.ms / 1000).toFixed(1)}s via ${info.tdBuild ?? 'toeexpand'}`];
+      if (exp.skipped.length) notes.push(`${exp.skipped.length} binary/oversized sidecar file(s) skipped`);
+      await this.importExpansion(exp.files, name, notes);
+    } catch (e) {
+      // A bridge that stopped mid-session must not strand the user.
+      this.bridge = null;
+      this.showToeGuide(file.name, (e as Error).message);
+    } finally {
+      done();
+    }
+  }
+
+  /** Drop targets: .webtoe.json loads, a .toe.dir folder imports, and a raw
+   *  .toe goes through the local bridge (guide only when it is unavailable). */
   private bindDropIntake(root: HTMLElement): void {
     root.addEventListener('dragover', (e) => e.preventDefault());
     root.addEventListener('drop', async (e) => {
@@ -246,7 +286,7 @@ export class EditorApp {
         }
         const file = e.dataTransfer?.files?.[0];
         if (!file) return;
-        if (/\.(toe|tox)$/i.test(file.name)) this.showToeGuide(file.name);
+        if (/\.(toe|tox)$/i.test(file.name)) await this.openToeFile(file);
         else if (/\.json$/i.test(file.name)) {
           this.adoptGraph(await loadProjectFile(file), file.name.replace(/\.webtoe\.json$|\.json$/, ''));
         } else this.toast(`unsupported drop: ${file.name}`);
@@ -256,26 +296,43 @@ export class EditorApp {
     });
   }
 
-  /** Honest raw-.toe story: the binary is a proprietary compressed container
-   *  (verified — see docs/RESEARCH.md), so the one-time expansion runs with the
-   *  user's own TouchDesigner install; the expanded folder drops right in. */
-  private showToeGuide(fileName: string): void {
+  /**
+   * Shown only when the automatic path is unavailable.
+   *
+   * Honest raw-.toe story: the binary is a proprietary compressed container
+   * (re-verified 2026-08-01 — docs/RESEARCH.md §1), so the one step that needs
+   * a TouchDesigner install has to happen outside the browser. The primary
+   * answer is one command that makes it permanent; the manual `toeexpand`
+   * route stays as the fallback for anyone who cannot run Node.
+   *
+   * While this modal is open it keeps probing, so starting the bridge in a
+   * terminal makes the dialog continue on its own — no re-drop needed.
+   */
+  private showToeGuide(fileName: string, problem?: string): void {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:70;display:grid;place-items:center;';
     const macCmd = `"/Applications/TouchDesigner.app/Contents/MacOS/toeexpand" "${fileName}"`;
     const winCmd = `"C:\\Program Files\\Derivative\\TouchDesigner\\bin\\toeexpand.exe" "${fileName}"`;
     const box = document.createElement('div');
-    box.style.cssText = 'background:#202027;border:1px solid #3a3a44;border-radius:10px;padding:18px 22px;max-width:600px;color:#d6d6dc;font-size:13px;line-height:1.65;';
+    box.style.cssText = 'background:#202027;border:1px solid #3a3a44;border-radius:10px;padding:18px 22px;max-width:640px;color:#d6d6dc;font-size:13px;line-height:1.65;';
     box.innerHTML = `
-      <div style="font-weight:700;color:#fff;margin-bottom:8px;">read ${escapeHtml(fileName)}</div>
-      <div><code>.toe</code> is a proprietary compressed binary, so browsers can't open it directly.
-      Your own TouchDesigner install converts it to text in one step — then drop the resulting
-      <b>${escapeHtml(fileName)}.dir</b> folder anywhere on this page (or pick it below).</div>
-      <div style="margin:10px 0 4px;color:#9a9aa3;">macOS</div>
-      <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">${escapeHtml(macCmd)}</pre>
-      <div style="margin:6px 0 4px;color:#9a9aa3;">Windows</div>
-      <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">${escapeHtml(winCmd)}</pre>
-      <div style="color:#9a9aa3;">or, with this repo checked out: <code>node packages/cli/toe-convert.mjs ${escapeHtml(fileName)}</code></div>
+      <div style="font-weight:700;color:#fff;margin-bottom:8px;">open ${escapeHtml(fileName)}</div>
+      ${problem ? `<div style="color:#e0a06a;margin-bottom:8px;">${escapeHtml(problem)}</div>` : ''}
+      <div><code>.toe</code> is a proprietary compressed binary — no browser can decode it. The one
+      step that needs TouchDesigner runs on your machine, and once this is running it happens by
+      itself every time you drop a file.</div>
+      <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;margin:10px 0 4px;" title="click to copy">git clone https://github.com/frank890417/WebToe
+cd WebToe &amp;&amp; npm install
+node packages/bridge/index.mjs</pre>
+      <div data-watch style="color:#9a9aa3;">waiting for the bridge on ${escapeHtml(DEFAULT_BRIDGE_URL)}… leave this open, it continues on its own.</div>
+      <details style="margin-top:12px;">
+        <summary style="cursor:pointer;color:#9a9aa3;">no Node? expand it by hand instead</summary>
+        <div style="margin:8px 0 4px;color:#9a9aa3;">macOS</div>
+        <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">${escapeHtml(macCmd)}</pre>
+        <div style="margin:6px 0 4px;color:#9a9aa3;">Windows</div>
+        <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">${escapeHtml(winCmd)}</pre>
+        <div style="color:#9a9aa3;">then drop the resulting <b>${escapeHtml(fileName)}.dir</b> folder anywhere on this page.</div>
+      </details>
       <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
         <button data-pick style="background:#7c6cff22;color:#cfc8ff;border:1px solid #7c6cff;border-radius:5px;padding:5px 14px;cursor:pointer;">pick the expanded folder…</button>
         <button data-close style="background:#2a2a31;color:#cfcfd6;border:1px solid #3a3a44;border-radius:5px;padding:5px 14px;cursor:pointer;">close</button>
@@ -286,12 +343,26 @@ export class EditorApp {
         this.toast('command copied');
       });
     });
-    box.querySelector('[data-close]')!.addEventListener('click', () => overlay.remove());
+
+    const watch = box.querySelector('[data-watch]') as HTMLElement;
+    const poll = setInterval(async () => {
+      const info = await probeBridge(500);
+      if (!info) return;
+      this.bridge = info;
+      clearInterval(poll);
+      watch.textContent = info.toeexpand
+        ? 'bridge found — drop the file again and it will open.'
+        : 'bridge found, but no TouchDesigner install on this machine.';
+      watch.style.color = info.toeexpand ? '#4fb286' : '#e0a06a';
+    }, 1500);
+    const close = () => { clearInterval(poll); overlay.remove(); };
+
+    box.querySelector('[data-close]')!.addEventListener('click', close);
     box.querySelector('[data-pick]')!.addEventListener('click', () => {
-      overlay.remove();
+      close();
       this.importLabel.querySelector('input')?.click();
     });
-    overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) close(); });
     overlay.appendChild(box);
     this.host.querySelector('.wt-root')!.appendChild(overlay);
   }
@@ -321,6 +392,15 @@ export class EditorApp {
     t.textContent = msg;
     this.host.querySelector('.wt-root')!.appendChild(t);
     setTimeout(() => t.remove(), 2600);
+  }
+
+  /** A toast that stays until the caller dismisses it — for work of unknown length. */
+  private stickyToast(msg: string): () => void {
+    const t = document.createElement('div');
+    t.className = 'wt-toast';
+    t.textContent = msg;
+    this.host.querySelector('.wt-root')!.appendChild(t);
+    return () => t.remove();
   }
 
   /** Texture for any previewable output: TOPs directly, SOP/geo through the
@@ -395,12 +475,16 @@ function button(label: string, onClick: () => void): HTMLButtonElement {
 
 /** Recursively read a dropped directory entry into importer files (paths
  *  relative to the dropped root). */
-async function readEntryTree(root: FileSystemDirectoryEntry): Promise<{ path: string; text(): Promise<string> }[]> {
-  const out: { path: string; text(): Promise<string> }[] = [];
+async function readEntryTree(root: FileSystemDirectoryEntry): Promise<ImportFile[]> {
+  const out: ImportFile[] = [];
   const walk = async (entry: FileSystemEntry, prefix: string): Promise<void> => {
     if (entry.isFile) {
       const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
-      out.push({ path: prefix + entry.name, text: () => file.text() });
+      out.push({
+        path: prefix + entry.name,
+        text: () => file.text(),
+        bytes: async () => new Uint8Array(await file.arrayBuffer()),
+      });
     } else if (entry.isDirectory) {
       const reader = (entry as FileSystemDirectoryEntry).createReader();
       // readEntries returns batches; loop until empty

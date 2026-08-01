@@ -25,6 +25,9 @@
 | Experiment | Verdict / artifact |
 |---|---|
 | Parse `.toe` binary directly: brute-force zlib/deflate/gzip/lzma/bz2 at offsets 0–32, then **full-file scan for zlib magic across all bytes** | **Dead end, twice-confirmed.** Container = `"10\0\0"` magic + length-ish field + proprietary compression. Do not retry without new information; the official `toeexpand` path is the way. (RESEARCH.md §1) |
+| Third attempt, 2026-08-01, with new information: 16,562-file corpus, per-byte-position entropy, raw deflate at **every** offset + all 7 bit shifts, linked-library inspection of `toeexpand` | **Dead end, third time — and the old header model was wrong.** Magic is 3 bytes `"10\0"`; the "length field at offset 4" does not survive contact with the corpus (ratio to filesize 0.00–14,053). Everything from offset 3 is opaque. `libUT` does link zlib, so any further attempt means disassembly, not codec guessing. **Do not brute-force codecs a fourth time.** |
+| Make the expansion step invisible instead of decoding it (`packages/bridge`) | **Shipped 2026-08-01, and it is the real answer to "read `.toe` with no extra operation".** Loopback service runs the user's own `toeexpand`; the browser just drops the file. 20 MB / 14,710-node show file → 8 s drop-to-graph. Same shape as the NDI bridge — local process owns the thing the browser cannot do. |
+| Import real (not fixture) projects and inspect DAT bodies | Found the **framed sidecar container** (RESEARCH §2.2): real `.text`/`.table` are length-prefixed binary, so every DAT body was previously garbage or dropped. 1,869 + 439 of them in one project. The fixture could never have caught this — hand-authored expansions are plain text. |
 | toecollapse round-trip of hand-edited text | Works — basis of the committed fixture and of web-editability claims. Caveats: needs the `.toc` listing; **authored `.parm` lines must include the mode column** (`ty 0 0.5`), the tools preserve text verbatim and don't normalize. |
 | Parameter "mode" field decoding | It's a **bitfield**: bit0 = expression active (`17, 49, 273…`), bit4 = string-with-default-expr. Decoded empirically from production files; importer relies on it; regression-tested. |
 | Corpus analysis at scale (60 projects expanded per run) | The strategy engine. Private tooling lives outside this repo; publishes only aggregates (ROADMAP/TD-PARITY numbers). Re-run after every op-coverage change. |
@@ -48,6 +51,9 @@
 
 **TouchDesigner format/semantics**
 - `toeexpand` exits **non-zero on success** — check for the output dir, not the exit code.
+- `toeexpand` **cannot open a non-ASCII filename**: it reads the path as Latin-1 and fails with `Error opening file: è¡¨æ¼”…`. Every project named in Chinese/Japanese/Korean — i.e. most of this user's corpus — fails unless you stage a copy under a plain-ASCII name first. Both the bridge and the CLI do; regression-tested in `tests/bridge.test.ts`.
+- `.text`/`.table` sidecars are a **framed binary container**, not text (RESEARCH §2.2). Read them as bytes and run `decodeTdSidecar`; `File.text()` glues 27 bytes of frame onto every DAT body.
+- Imported networks keep TD's own tile coordinates, which routinely sit thousands of pixels from the origin — the network view must frame content on entry or a correct import looks like an empty canvas.
 - TD type tokens ≠ UI names (Composite TOP = `comp`, Video Device In = `videodevin`). Extend TYPE_MAP from import-report histograms, not guesses.
 - Composite/over: **input 0 is the TOP layer**. Math CHOP order: pre-op → combine channels → combine CHOPs → post-op → mult-add → range.
 - Parm values may be quoted (`channames 0 "tx ty"`) — unquote. BOM (`﻿`) appears before quoted paths.

@@ -18,6 +18,8 @@ export class NetworkView {
   private readonly nodeEls = new Map<number, HTMLDivElement>();
   private readonly thumbs = new Map<number, HTMLDivElement>();
   private tf: ViewTransform = { x: 60, y: 60, k: 1 };
+  /** set when framing was asked for while the panel had no measurable size */
+  private pendingFrame = false;
   private preview: SVGPathElement | null = null;
   private dragWireSrc: NodeInst | null = null;
   private lastPointer = { x: 200, y: 200 };
@@ -57,6 +59,7 @@ export class NetworkView {
     this.palette = new Palette(el, (type) => this.createAt(type));
     this.bindEvents();
     this.applyTransform();
+    new ResizeObserver(() => { if (this.pendingFrame) this.frameContent(); }).observe(el);
   }
 
   // ------------------------------------------------------------ public
@@ -65,6 +68,42 @@ export class NetworkView {
     this.current = container;
     this.select(null);
     this.rebuild();
+    this.frameContent();
+  }
+
+  /**
+   * Pan/zoom so the whole network is on screen.
+   *
+   * Imported projects keep TouchDesigner's own tile coordinates, which for a
+   * real patch routinely sit thousands of pixels from the origin — entering a
+   * COMP would otherwise show an empty canvas and read as a broken import.
+   * A patch built in the app starts near the origin, so this is a no-op there.
+   */
+  frameContent(): void {
+    const kids = this.engine.graph.childrenOf(this.current);
+    if (!kids.length) return;
+    const pad = 60;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of kids) {
+      const elN = this.nodeEls.get(n.id);
+      minX = Math.min(minX, n.pos.x);
+      minY = Math.min(minY, n.pos.y);
+      maxX = Math.max(maxX, n.pos.x + (elN?.offsetWidth || 132));
+      maxY = Math.max(maxY, n.pos.y + (elN?.offsetHeight || 60));
+    }
+    const vw = this.el.clientWidth;
+    const vh = this.el.clientHeight;
+    // Unmeasurable panel (hidden tab, or imported before first layout): keep the
+    // current view and retry once the element actually has a size, rather than
+    // computing a transform from zeros and parking the whole patch off-screen.
+    if (vw < 2 || vh < 2) { this.pendingFrame = true; return; }
+    this.pendingFrame = false;
+    const k = Math.min(1, (vw - pad * 2) / Math.max(1, maxX - minX), (vh - pad * 2) / Math.max(1, maxY - minY));
+    this.tf.k = Math.max(0.05, k);
+    this.tf.x = (vw - (maxX - minX) * this.tf.k) / 2 - minX * this.tf.k;
+    this.tf.y = (vh - (maxY - minY) * this.tf.k) / 2 - minY * this.tf.k;
+    this.applyTransform();
+    this.updateWires();
   }
 
   rebuild(): void {

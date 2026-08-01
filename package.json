@@ -8,8 +8,13 @@
     "packages/*",
     "apps/*"
   ],
+  "bin": {
+    "webtoe": "packages/bridge/index.mjs",
+    "webtoe-bridge": "packages/bridge/index.mjs"
+  },
   "scripts": {
     "dev": "npm run dev -w apps/web",
+    "bridge": "node packages/bridge/index.mjs",
     "build": "npm run build -w apps/web",
     "preview": "npm run preview -w apps/web",
     "test": "vitest run --passWithNoTests",

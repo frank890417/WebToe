@@ -17,15 +17,30 @@
 
 ## 1. The `.toe` container format (binary)
 
-Observed on real files (a 770 B template, build 2023.11290; a 17.6 KB production project, build 2025.31500):
+**Re-verified 2026-08-01** against a 16,562-file local corpus (previously: two samples). The 2026-06-11 model below the line was partly wrong and is corrected here.
+
+Per-byte-position entropy across 590 randomly sampled real `.toe` files:
 
 ```
-offset 0   31 30 00 00        ASCII "10" + nulls (format magic/version)
-offset 4   length-like field  matches (filesize − 10) in both samples
-offset ~8+ high-entropy data  compressed payload
+offset 0-2   31 30 00      constant in 590/590 → the magic is "10\0", three bytes
+offset 3      23 distinct values, H=3.16 bits
+offset 4-5    193 / 32 distinct, H=7.23 / 4.97
+offset 6      3 distinct (00 in 560/590), H=0.30
+offset 7      54 distinct, H=4.57
+offset 8+     ~7.5 bits/byte — indistinguishable from random
 ```
 
-- Brute-forcing zlib / raw deflate / gzip / lzma / lzma-alone / bz2 at offsets 0–32: **nothing matches** → compression is proprietary or non-standard. A pure-JS/browser binary parser would require real reverse engineering of the codec — not practical, and unnecessary given `toeexpand`.
+- **The old "length field at offset 4" claim is false.** On the committed fixture it reads 6,148 against a 1,058-byte file; across the corpus the ratio to file size ranges from 0.00 to 14,053 with a median near 859. Several unrelated large files share near-identical values there (503,332,884 / 503,333,101 / 503,359,702), which is the signature of *similar compressed content*, not of a size header. Treat everything from offset 3 as opaque payload.
+- Brute-forcing zlib / raw deflate (all window sizes) / gzip / lzma / lzma-alone / bz2 at **every** byte offset of a whole file, plus all seven sub-byte bit shifts for raw deflate: **zero hits**. (The 2026-06 pass scanned only for the zlib magic, which raw deflate does not have — this run closes that gap.)
+- `toeexpand` links `/usr/lib/libz` and `libminizip` through `libUT.dylib`, so zlib *is* present in the process; it is evidently not what wraps the container. Decoding it would mean disassembling `libUT`/`libtools`, not guessing a codec.
+
+**Verdict unchanged: no browser-side `.toe` decode.** What changed on 2026-08-01 is the *user-facing* consequence — the expansion step now runs automatically through the local bridge (`packages/bridge`), so "cannot decode in the browser" no longer means "the user does extra work". See README § Importing.
+
+<details><summary>2026-06-11 original observations (superseded)</summary>
+
+Observed on real files (a 770 B template, build 2023.11290; a 17.6 KB production project, build 2025.31500): magic `31 30 00 00`, "length-like" field at offset 4 matching filesize − 10 in both samples, high-entropy payload from ~offset 8. Brute-forcing zlib / raw deflate / gzip / lzma / lzma-alone / bz2 at offsets 0–32 matched nothing.
+
+</details>
 - Officially: "A TouchDesigner Environment file (.toe) … contains your networks, operators, parameters, Pane layouts and optionally MIDI settings" ([docs.derivative.ca/.toe](https://docs.derivative.ca/.toe)).
 - The binary format internals are **undocumented by the vendor**; the official [Toeexpand doc page](https://docs.derivative.ca/Toeexpand) is minimal and was last edited 2022-10-03.
 
@@ -59,6 +74,21 @@ Inventory from a large stock example (8,281 files): `.n` ×2739, `.parm` ×2652,
 | `X.panel`, `X.network` | Panel state / network-view state |
 | `X/` (subdir) | Children of COMP `X` — recurse |
 | `.build` | `version / build / time / osname / osversion` |
+
+### 2.2 The sidecar container — `.text` and `.table` are **not** plain text (2026-08-01)
+
+Hand-authored expansions (and therefore the committed fixture) hold DAT bodies as plain text, which is why this went unnoticed for two months. In genuine `toeexpand` output they are framed:
+
+```
+byte 0      "1" = table, "2" = text
+bytes 1-2   "\n*"
+bytes 3-18  u32be × 4:  1, rows, cols, 0        (a text sidecar uses 1,1,1,1)
+then        values, each: u32be type (2 = utf-8 string) + u32be length + bytes
+```
+
+A text sidecar carries exactly one value; a table carries `rows × cols` in row-major order. Verified on two real projects — every declared length matched the bytes remaining, nothing left over.
+
+Consequence: reading a real `.text` with `File.text()` prepends 27 bytes of binary garbage to every DAT body, and NUL-guarding drops the body entirely. One real 20 MB project contains **1,869 `.text` and 439 `.table` sidecars**. Decoder: `packages/io/src/tdContainer.ts`; genuinely binary payloads (`.lod` MIDI state, baked `.data`) still return null rather than mojibake.
 
 Key consequences:
 - **The complete logical graph is recoverable as text**: types, names, hierarchy, wires, parameter values *and* expressions, Python code, layout positions, comments.

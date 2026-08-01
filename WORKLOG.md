@@ -107,9 +107,10 @@ Append-only build log. Protocol: every work chunk gets an entry — timestamp, w
 
 Backlog (v2 — full detail and measured targets in docs/ROADMAP.md, full parity map in docs/TD-PARITY.md):
 1. M8 compute particle family (POPs spirit) + audio-rate CHOPs (wasm decision per PLAN §5 benchmark gate).
-2. Importer round 3: cross-network wire resolution, raw-.toe drop explainer modal, more TYPE_MAP/PARAM_MAP entries driven by real import-report histograms, media relink-by-drop flow.
+2. Importer round 3: cross-network wire resolution (258 wires skipped on the 14.7k-node show file), more TYPE_MAP/PARAM_MAP entries from the real histograms below, media relink-by-drop flow.
 3. Editor round 2: marquee select, undo/redo, node rename UI, COMP display-child preview thumbs, mobile/touch pan-zoom.
 4. Watch derivative.ca for the official JSON text format → add the second ProjectLoader (PLAN §3 adapter).
+5. Bridge round 2: progress events for multi-second expansions (a 20 MB project spends ~4.6 s in `toeexpand` behind a single toast), and `--watch` so re-saving in TD re-imports live.
 
 ## 2026-06-11 — agent handoff log + NDI In/Out (bridge + WASM)
 
@@ -117,3 +118,16 @@ Backlog (v2 — full detail and measured targets in docs/ROADMAP.md, full parity
 - **NDI In/Out**: honest architecture — local bridge (`packages/ndi-bridge`: ws server, `--mock` animated UYVY test source + frame sink with zero NDI deps; real mode via user-installed NDI runtime + optional `grandiose`) ⇄ versioned binary frame protocol ⇄ `top:ndiin`/`top:ndiout` ops ⇄ **WASM video kernels** (AssemblyScript in `packages/wasm-kernels`, 1 KB artifact committed + served; BT.601 UYVY⇄RGBA + BGRA swizzle; JS reference is unit-tested fallback; loader swaps provider at boot — console logs `video kernels: wasm`).
 - Verified end-to-end in browser with the mock bridge: ndiin renders the animated rainbow pattern through the WASM path (zero errors, frames animate), ndiout streams noise back (bridge log: `← browser frame #1 320x180 RGBA`). 66/66 tests incl. kernel math + protocol round-trip.
 - TD-PARITY: NDI reclassified native-only → **web-equivalent via local bridge**; the pattern generalizes (Art-Net, Syphon capture). README documents usage + NDI trademark notice.
+
+## 2026-08-01 — `.toe` becomes a plain drop target (bridge + framed sidecars + real-project fixes)
+
+The brief was "actually read/parse `.toe` with no extra operation". Two halves: retire the manual step, and fix what only shows up on real files.
+
+- **Re-attacked the binary container first** (HANDOFF §2 says do not retry without new information — the new information was a 16,562-file local corpus). Per-byte-position entropy over 590 files: the magic is **3 bytes `"10\0"`**, and the previously documented "length field at offset 4" is **falsified** (ratio to filesize 0.00–14,053; unrelated large files share near-identical values there). Raw deflate at *every* offset plus all 7 bit shifts, and lzma/bz2 sweeps: zero hits. `toeexpand` links zlib via `libUT` but plainly does not use it for this. **Third confirmation of the dead end** — recorded in RESEARCH §1 with the old model kept, marked superseded.
+- **`packages/bridge` (`npx webtoe`)** — zero-dependency loopback service: finds the user's own `toeexpand`, expands an uploaded container in a temp dir, returns the expansion as importer-ready files, and serves the built app so there is no mixed-content or CORS problem at all. Ships nothing of Derivative's; binds 127.0.0.1; CORS + `Access-Control-Allow-Private-Network` so the hosted GitHub Pages app can use it too.
+- **Editor**: dropping (or picking) a `.toe`/`.tox` now probes the bridge and imports straight through. No bridge → the guide modal leads with `npx webtoe` and **keeps polling**, so starting it in a terminal makes the dialog continue on its own; the manual `toeexpand` route and folder drop stay as fallbacks.
+- **Framed sidecar container decoded** (RESEARCH §2.2, `packages/io/src/tdContainer.ts`): real `.text`/`.table` are `tag + "\n*" + u32be×4 + (type,len,bytes)…`, not plain text. Before this every DAT body in a real import was either 27 bytes of garbage or silently dropped — the committed fixture is hand-authored plain text, so no test could have caught it. `ImportFile` grew an optional `bytes()`; all four producers supply it.
+- **`toeexpand` cannot open non-ASCII filenames** (reads paths as Latin-1). Every Chinese-named project failed. Bridge and CLI now stage under an ASCII name; regression-tested.
+- **Network view frames its content on entry** — imported networks keep TD tile coordinates thousands of pixels from the origin, so a correct import used to look like an empty canvas. Defers when the panel has no measurable size instead of computing a transform from zeros.
+- **Measured, on the user's real 20 MB show file** (`.toe` → running graph, drag only): **8.0 s end to end** (4.6 s of it `toeexpand`), 14,710 nodes, **10,239 runnable (70%)**, 2,244 expressions translated, 2,251 DAT bodies recovered with zero framing leaks, no console errors. Small daily sketch: 79 nodes, 57%, 0.2 s.
+- 80/80 tests (was 66): new `td-container` suite (7) and `bridge` suite (protocol everywhere, expansion + non-English filename where TD is installed).

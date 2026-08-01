@@ -9,7 +9,14 @@ export function collectImportFiles(root: string): ImportFile[] {
     for (const e of readdirSync(dir)) {
       const p = join(dir, e);
       if (statSync(p).isDirectory()) walk(p);
-      else out.push({ path: relative(root, p).replace(/\\/g, '/'), text: async () => readFileSync(p, 'latin1') });
+      else {
+        out.push({
+          path: relative(root, p).replace(/\\/g, '/'),
+          text: async () => readFileSync(p, 'latin1'),
+          // sidecars must be read as bytes — real `.text`/`.table` are framed
+          bytes: async () => new Uint8Array(readFileSync(p)),
+        });
+      }
     }
   };
   walk(root);

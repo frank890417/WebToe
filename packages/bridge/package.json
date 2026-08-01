@@ -1,0 +1,15 @@
+{
+  "name": "webtoe-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local service that expands TouchDesigner .toe/.tox files with the user's own toeexpand so the browser can open them by drag-and-drop. Ships no Derivative code; loopback only; zero dependencies.",
+  "bin": {
+    "webtoe": "./index.mjs",
+    "webtoe-bridge": "./index.mjs"
+  },
+  "exports": {
+    ".": "./index.mjs",
+    "./expand": "./expand.mjs"
+  }
+}

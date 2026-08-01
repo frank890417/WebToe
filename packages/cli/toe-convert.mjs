@@ -136,7 +136,9 @@ function readNetwork(dir) {
 const toeexpand = findToeexpand();
 const work = mkdtempSync(join(tmpdir(), 'webtoe-'));
 try {
-  const copy = join(work, basename(input));
+  // ASCII-only staging name: toeexpand reads paths as Latin-1 and fails on any
+  // non-English filename. The disk name has no effect on the expansion.
+  const copy = join(work, `input${basename(input).toLowerCase().endsWith('.tox') ? '.tox' : '.toe'}`);
   cpSync(input, copy);
   try {
     execFileSync(toeexpand, [copy], { cwd: work, stdio: 'pipe' });

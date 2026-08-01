@@ -14,11 +14,17 @@ import {
   type Family, type GraphJSON, type ImportReport, type NodeJSON,
   type ParamValueJSON, type WireJSON,
 } from '@webtoe/core';
+import { decodeTdSidecar } from './tdContainer';
 
 export interface ImportFile {
   /** path relative to the expansion root, e.g. "project1/noise1.n" */
   path: string;
   text(): Promise<string>;
+  /** Raw bytes, when the source can supply them. `.n`/`.parm` are plain text,
+   *  but `.text`/`.table` sidecars are framed binary (see tdContainer.ts) and
+   *  can only be read correctly from bytes. Optional so hand-authored and
+   *  fixture sources keep working unchanged. */
+  bytes?(): Promise<Uint8Array>;
 }
 
 export interface ProjectLoader {
@@ -423,14 +429,11 @@ export const toedirLoader: ProjectLoader = {
       const parmFile = byPath.get(`${dir ? dir + '/' : ''}${name}.parm`);
       if (parmFile) node.parms = parseParmFile(await parmFile.text());
       const textFile = byPath.get(`${dir ? dir + '/' : ''}${name}.text`);
-      if (textFile) node.text = await textFile.text();
+      if (textFile) node.text = await readSidecar(textFile) ?? undefined;
       if (node.text === undefined) {
-        // table DATs store their rows in a .table sidecar (text unless baked binary)
+        // table DATs store their rows in a .table sidecar, TSV once unframed
         const tableFile = byPath.get(`${dir ? dir + '/' : ''}${name}.table`);
-        if (tableFile) {
-          const t = await tableFile.text();
-          if (!t.includes('\0')) node.text = t;
-        }
+        if (tableFile) node.text = await readSidecar(tableFile) ?? undefined;
       }
       net.set(name, node);
     }
@@ -569,6 +572,17 @@ export const toedirLoader: ProjectLoader = {
   },
 };
 
+/**
+ * Read a DAT body sidecar. Prefers raw bytes so the TouchDesigner frame can be
+ * removed; falls back to `text()` for sources that only offer text (fixtures,
+ * hand-authored expansions), where the old NUL guard still applies.
+ */
+async function readSidecar(file: ImportFile): Promise<string | null> {
+  if (file.bytes) return decodeTdSidecar(await file.bytes())?.text ?? null;
+  const t = await file.text();
+  return t.includes('\0') ? null : t;
+}
+
 /** Browser helper: turn a webkitdirectory FileList into ImportFiles,
  *  stripping the top-level "<name>.toe.dir/" segment. */
 export function importFilesFromFileList(list: FileList | File[]): ImportFile[] {
@@ -577,6 +591,10 @@ export function importFilesFromFileList(list: FileList | File[]): ImportFile[] {
     let p = (f.webkitRelativePath || f.name).replace(/\\/g, '/');
     const segs = p.split('/');
     if (segs.length > 1) p = segs.slice(1).join('/');
-    return { path: p, text: () => f.text() };
+    return {
+      path: p,
+      text: () => f.text(),
+      bytes: async () => new Uint8Array(await f.arrayBuffer()),
+    };
   });
 }

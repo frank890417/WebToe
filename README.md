@@ -32,17 +32,31 @@ WebToe is an original engine and editor built from scratch for the web. It is no
 
 ![Import report dialog after importing a 213-node production project](docs/media/import-report.png)
 
-Every TouchDesigner install ships `toeexpand`, the official CLI that converts a binary `.toe` into readable text. WebToe consumes that expansion — your project files never leave your machine, and WebToe bundles nothing of Derivative's.
-
-**Drop files anywhere on the page**: a `.webtoe.json` loads, a `.toe.dir` folder imports, and a raw `.toe` opens a guide with the exact copy-paste `toeexpand` command for your file (the binary container is proprietary, so the one-time expansion runs with your own TD install) plus a folder picker for the result.
+**Drop a `.toe` on the page and it opens.** No CLI step, no folder shuffling.
 
 ```bash
-# option A — one-step CLI (finds toeexpand in your local TD install):
-node packages/cli/toe-convert.mjs myproject.toe        # → myproject.webtoe.json
-
-# option B — expand manually, then drop the .toe.dir folder onto the page:
-"/Applications/TouchDesigner.app/Contents/MacOS/toeexpand" myproject.toe
+git clone https://github.com/frank890417/WebToe && cd WebToe && npm install
+npm run build && npm run bridge   # serves the app locally — open it and drag your .toe in
 ```
+
+(The bridge is not on npm yet, so today it runs from a checkout. Publishing it is what turns those three lines into a bare `npx webtoe`.)
+
+A `.toe` is a proprietary compressed container that no browser can decode (see [RESEARCH §1](docs/RESEARCH.md)). The one step that genuinely needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — therefore runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
+
+Already using the hosted app? Run the bridge alone in a terminal and the hosted page will find it. With no bridge at all, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
+
+```bash
+# bridge only, for the hosted app at frank890417.github.io/WebToe
+node packages/bridge/index.mjs
+
+# no Node? expand by hand, then drop the resulting .toe.dir folder on the page
+"/Applications/TouchDesigner.app/Contents/MacOS/toeexpand" myproject.toe
+
+# batch/scripted conversion to a project file
+node packages/cli/toe-convert.mjs myproject.toe        # → myproject.webtoe.json
+```
+
+Measured on a real 20 MB show file (14,710 nodes): **8 seconds from drop to a running graph**, 70% of nodes runnable, 2,244 expressions translated.
 
 What the importer recovers: node types and hierarchy, wires (including wires across COMP boundaries and in/out tunnels), parameter values, **live Python expressions** (translated to WebToe expressions where faithful — `absTime.seconds*0.2` → `time.seconds*0.2` — and kept inert otherwise), DAT text and Python source, and network layout. The parameter mode field is a bitfield decoded from production files (bit 0 = expression), so flagged expression modes import too.
 
@@ -50,8 +64,8 @@ What the importer recovers: node types and hierarchy, wires (including wires acr
 
 `.toe` reading is covered by a two-layer automated suite built on an **original committed fixture** — a real binary `.toe` plus its canonical `toeexpand` expansion, authored for this repo and round-tripped through the official tools ([provenance](tests/fixtures/README.md)):
 
-1. a CI-safe layer asserts the full reconstructed graph — types, COMP-boundary and tunnel wires, parameter modes, translated expressions evaluated in the engine, honest stubs, report numbers;
-2. an integration layer (auto-skipped where TD isn't installed) expands the committed binary with the real `toeexpand` and runs the CLI end-to-end.
+1. a CI-safe layer asserts the full reconstructed graph — types, COMP-boundary and tunnel wires, parameter modes, translated expressions evaluated in the engine, honest stubs, report numbers, plus the sidecar container decoder;
+2. an integration layer (auto-skipped where TD isn't installed) expands the committed binary with the real `toeexpand` and runs the CLI and the bridge end-to-end — including a project whose filename is not English.
 
 ## Operator set (v1)
 
@@ -92,6 +106,7 @@ npm workspaces with a strict downward dependency rule — `apps/web → editor �
 | `@webtoe/io` | `.webtoe.json` + the `toeexpand`-output importer behind a `ProjectLoader` adapter (Derivative's announced official JSON format slots in beside it) |
 | `@webtoe/editor` | embeddable, framework-free editor — `mountEditor(el, opts)` |
 | `@webtoe/cli` | `toe-convert.mjs` |
+| `webtoe-bridge` | loopback service: serves the app and runs your own `toeexpand` so `.toe` is a plain drop target |
 
 Deep dives: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · execution contract & milestones: [PLAN.md](PLAN.md) · build log: [WORKLOG.md](WORKLOG.md) · research foundation (file-format findings, feasibility, sources): [docs/RESEARCH.md](docs/RESEARCH.md)
 
