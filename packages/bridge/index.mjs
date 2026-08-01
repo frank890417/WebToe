@@ -15,7 +15,7 @@
  * loopback only and does exactly two things: report health, and expand a file
  * it was handed. Parsing lives in `@webtoe/io`, not here.
  */
-import { createReadStream, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
@@ -49,7 +49,7 @@ function findAppDist(explicit) {
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Access-Control-Max-Age', '600');
 }
@@ -92,8 +92,11 @@ function serveStatic(res, distDir, urlPath) {
   createReadStream(file).pipe(res);
 }
 
-export function createBridgeServer({ appDist = null, toeexpand = null } = {}) {
+export function createBridgeServer({ appDist = null, toeexpand = null, token = null, maxConcurrent = 3 } = {}) {
   const dist = findAppDist(appDist);
+  // Serialize heavy work: each expand runs a native child process; on a shared
+  // (tunneled/LAN) bridge, unbounded parallel uploads would be a free DoS.
+  let activeExpands = 0;
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
 
@@ -104,16 +107,31 @@ export function createBridgeServer({ appDist = null, toeexpand = null } = {}) {
       sendJson(res, 200, {
         ok: true, service: 'webtoe-bridge', version: VERSION,
         toeexpand: tool, tdBuild: tool ? toeexpandBuild(tool) : null,
-        app: !!dist,
+        app: !!dist, tokenRequired: !!token,
       });
       return;
     }
 
     if (url.pathname === '/expand' && req.method === 'POST') {
+      // Optional bearer gate — what makes exposing the bridge beyond loopback
+      // (Tailscale / a tunnel) sane. Health stays open so the app can explain
+      // "bridge found, token needed" instead of showing a dead endpoint.
+      if (token) {
+        const auth = req.headers.authorization ?? '';
+        if (auth !== `Bearer ${token}`) {
+          sendJson(res, 401, { ok: false, error: 'this bridge requires a token — open the app with ?bridgeToken=<token> once' });
+          return;
+        }
+      }
+      if (activeExpands >= maxConcurrent) {
+        sendJson(res, 429, { ok: false, error: 'bridge is busy — try again in a moment' });
+        return;
+      }
       const raw = url.searchParams.get('name') ?? 'project.toe';
       const name = raw.split(/[/\\]/).pop().replace(/[^\w.\-@ ()一-鿿]/g, '_');
       if (!/\.(toe|tox)$/i.test(name)) { sendJson(res, 400, { ok: false, error: 'name must end in .toe or .tox' }); return; }
       let staged = null;
+      activeExpands++;
       try {
         staged = await receiveToFile(req, name);
         const out = await expandToe(staged.path, { toeexpand });
@@ -121,6 +139,7 @@ export function createBridgeServer({ appDist = null, toeexpand = null } = {}) {
       } catch (e) {
         sendJson(res, e?.code === 'NO_TOEEXPAND' ? 501 : 500, { ok: false, error: e.message, code: e?.code ?? null });
       } finally {
+        activeExpands--;
         if (staged) rmSync(staged.dir, { recursive: true, force: true });
       }
       return;
@@ -144,21 +163,35 @@ function openBrowser(url) {
     .catch(() => {});
 }
 
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (invokedDirectly) {
+/** npm installs the bin as a symlink (`.bin/webtoe → ../webtoe/index.mjs`), and
+ *  path.resolve is lexical — it never follows links. realpathSync does, so the
+ *  same file answers as main whether launched directly or through the shim. */
+function isMain() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+
+if (isMain() || process.env.WEBTOE_FORCE_MAIN === '1') {
   const args = process.argv.slice(2);
   const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
   const port = Number(flag('--port') ?? process.env.WEBTOE_BRIDGE_PORT ?? DEFAULT_PORT);
-  const shouldOpen = args.includes('--open') || /(^|[/\\])webtoe(\.(cmd|ps1))?$/.test(process.argv[1] ?? '');
+  const host = flag('--host') ?? process.env.WEBTOE_HOST ?? '127.0.0.1';
+  const token = flag('--token') ?? process.env.WEBTOE_TOKEN ?? null;
+  const shouldOpen = !args.includes('--no-open');
+  const loopback = /^(127\.0\.0\.1|localhost|::1)$/.test(host);
 
-  const server = createBridgeServer({ appDist: flag('--app'), toeexpand: flag('--toeexpand') });
-  server.listen(port, '127.0.0.1', async () => {
+  const server = createBridgeServer({ appDist: flag('--app'), toeexpand: flag('--toeexpand'), token });
+  server.listen(port, host, async () => {
     const tool = findToeexpand(flag('--toeexpand'));
     const dist = findAppDist(flag('--app'));
-    console.log(`webtoe-bridge ${VERSION} → http://127.0.0.1:${port}`);
+    console.log(`webtoe ${VERSION} → http://${loopback ? '127.0.0.1' : host}:${port}`);
     console.log(tool ? `  toeexpand: ${tool}` : '  toeexpand: NOT FOUND — install TouchDesigner, or pass --toeexpand <path>');
-    console.log(dist ? '  serving the app locally — drop a .toe on the page and it opens' : '  bridge only — use it from https://frank890417.github.io/WebToe/');
-    if (shouldOpen && dist) openBrowser(`http://127.0.0.1:${port}/WebToe/`);
+    console.log(dist ? '  serving the app — drop a .toe on the page and it opens' : '  bridge only — use it from https://frank890417.github.io/WebToe/');
+    if (!loopback && !token) {
+      console.log('  ⚠️  bound beyond loopback with NO --token: anyone who can reach this port can run');
+      console.log('     your toeexpand on files they upload. Set --token (see docs/PUBLISH.md §deploy).');
+    }
+    if (shouldOpen && dist && loopback) openBrowser(`http://127.0.0.1:${port}/WebToe/`);
   });
   server.on('error', (e) => {
     console.error(e.code === 'EADDRINUSE' ? `port ${port} is busy — another bridge is probably already running` : e.message);

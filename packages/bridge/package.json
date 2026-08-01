@@ -1,9 +1,9 @@
 {
-  "name": "webtoe-bridge",
+  "name": "webtoe",
   "version": "0.1.0",
-  "private": true,
+  "description": "Open TouchDesigner .toe files in the browser: `npx webtoe` serves the WebToe editor and runs your own toeexpand so a .toe is a plain drop target. Ships no Derivative code; loopback by default; zero dependencies.",
   "type": "module",
-  "description": "Local service that expands TouchDesigner .toe/.tox files with the user's own toeexpand so the browser can open them by drag-and-drop. Ships no Derivative code; loopback only; zero dependencies.",
+  "license": "MIT",
   "bin": {
     "webtoe": "./index.mjs",
     "webtoe-bridge": "./index.mjs"
@@ -11,5 +11,29 @@
   "exports": {
     ".": "./index.mjs",
     "./expand": "./expand.mjs"
-  }
+  },
+  "files": [
+    "index.mjs",
+    "index.d.mts",
+    "expand.mjs",
+    "expand.d.mts",
+    "public"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frank890417/WebToe.git",
+    "directory": "packages/bridge"
+  },
+  "homepage": "https://frank890417.github.io/WebToe/",
+  "keywords": [
+    "touchdesigner",
+    "toe",
+    "toeexpand",
+    "creative-coding",
+    "dataflow",
+    "webgl"
+  ]
 }

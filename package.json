@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "npm run dev -w apps/web",
     "bridge": "node packages/bridge/index.mjs",
+    "release:prep": "npm run build && node tools/prep-webtoe-package.mjs",
     "build": "npm run build -w apps/web",
     "preview": "npm run preview -w apps/web",
     "test": "vitest run --passWithNoTests",

@@ -69,6 +69,39 @@ describe('webtoe-bridge protocol', () => {
   });
 });
 
+describe('webtoe-bridge token gate (non-loopback deployments)', () => {
+  let tbase = '';
+  let tserver: ReturnType<typeof createBridgeServer>;
+
+  beforeAll(async () => {
+    tserver = createBridgeServer({ token: 'sesame' });
+    await new Promise<void>((res) => tserver.listen(0, '127.0.0.1', res));
+    tbase = `http://127.0.0.1:${(tserver.address() as { port: number }).port}`;
+  });
+  afterAll(() => new Promise<void>((res) => tserver.close(() => res())));
+
+  it('advertises tokenRequired on /health without leaking the token', async () => {
+    const j = await (await fetch(`${tbase}/health`)).json();
+    expect(j.tokenRequired).toBe(true);
+    expect(JSON.stringify(j)).not.toContain('sesame');
+  });
+
+  it('rejects /expand without or with a wrong bearer, accepts the right one', async () => {
+    const noAuth = await fetch(`${tbase}/expand?name=a.toe`, { method: 'POST', body: 'x' });
+    expect(noAuth.status).toBe(401);
+    const wrong = await fetch(`${tbase}/expand?name=a.toe`, {
+      method: 'POST', body: 'x', headers: { Authorization: 'Bearer nope' },
+    });
+    expect(wrong.status).toBe(401);
+    // right token passes the gate — a garbage body then fails at expansion,
+    // proving the request got past auth (any non-401 status)
+    const right = await fetch(`${tbase}/expand?name=a.toe`, {
+      method: 'POST', body: 'x', headers: { Authorization: 'Bearer sesame' },
+    });
+    expect(right.status).not.toBe(401);
+  });
+});
+
 describe.skipIf(!toeexpand)('webtoe-bridge expansion (requires local TouchDesigner)', () => {
   it('turns a dropped binary .toe into the same graph as the committed expansion', async () => {
     const r = await fetch(`${base}/expand?name=tiny.toe`, {

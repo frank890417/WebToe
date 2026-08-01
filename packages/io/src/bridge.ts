@@ -16,6 +16,7 @@ import type { ImportFile } from './toedir';
 
 export const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:9881';
 const STORAGE_KEY = 'webtoe.bridgeUrl';
+const TOKEN_KEY = 'webtoe.bridgeToken';
 
 export interface BridgeInfo {
   url: string;
@@ -23,6 +24,8 @@ export interface BridgeInfo {
   /** Absolute path of the toeexpand the bridge found, or null if TD is missing. */
   toeexpand: string | null;
   tdBuild: string | null;
+  /** Bridge is bound beyond loopback and expects `?bridgeToken=` (sent as a bearer). */
+  tokenRequired: boolean;
 }
 
 export interface BridgeExpansion {
@@ -37,7 +40,12 @@ export interface BridgeExpansion {
 export function bridgeCandidates(): string[] {
   const out: string[] = [];
   try {
-    const q = new URLSearchParams(location.search).get('bridge');
+    const params = new URLSearchParams(location.search);
+    // ?bridgeToken= pairs a shared (tunneled/LAN) bridge with its bearer —
+    // saved once, sent on every /expand from then on.
+    const tok = params.get('bridgeToken');
+    if (tok) localStorage.setItem(TOKEN_KEY, tok);
+    const q = params.get('bridge');
     if (q) out.push(q.replace(/\/$/, ''));
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) out.push(saved.replace(/\/$/, ''));
@@ -60,9 +68,14 @@ async function health(url: string, timeoutMs: number): Promise<BridgeInfo | null
   try {
     const res = await fetch(`${url}/health`, { signal: ctl.signal, mode: 'cors' });
     if (!res.ok) return null;
-    const j = await res.json() as { service?: string; version?: string; toeexpand?: string | null; tdBuild?: string | null };
+    const j = await res.json() as {
+      service?: string; version?: string; toeexpand?: string | null; tdBuild?: string | null; tokenRequired?: boolean;
+    };
     if (j.service !== 'webtoe-bridge') return null;
-    return { url, version: j.version ?? '?', toeexpand: j.toeexpand ?? null, tdBuild: j.tdBuild ?? null };
+    return {
+      url, version: j.version ?? '?', toeexpand: j.toeexpand ?? null,
+      tdBuild: j.tdBuild ?? null, tokenRequired: !!j.tokenRequired,
+    };
   } catch {
     return null;
   } finally {
@@ -94,10 +107,15 @@ function fromBase64(b64: string): Uint8Array {
 
 /** POST the container, get the expansion back as importer-ready files. */
 export async function expandViaBridge(file: File, info: BridgeInfo): Promise<BridgeExpansion> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
+  try {
+    const tok = localStorage.getItem(TOKEN_KEY);
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  } catch { /* private mode */ }
   const res = await fetch(`${info.url}/expand?name=${encodeURIComponent(file.name)}`, {
     method: 'POST',
     mode: 'cors',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers,
     body: file,
   });
   const body = await res.json().catch(() => null) as

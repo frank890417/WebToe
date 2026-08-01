@@ -9,3 +9,4 @@ dist/
 *.toc
 # committed original test fixture (see tests/fixtures/README.md)
 !tests/fixtures/tiny.toe
+packages/bridge/public/
