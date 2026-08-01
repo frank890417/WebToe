@@ -146,3 +146,37 @@ The brief was "actually read/parse `.toe` with no extra operation". Two halves: 
 - **bridge.py — the no-Node path.** Every TouchDesigner install ships a Python interpreter, so a single stdlib-only file gives the exact same protocol as `npx webtoe` (`/health`, `/expand`, same JSON, same CORS + Private-Network headers, same ASCII-staging + framed-sidecar + token/host/concurrency behavior). Served at `/WebToe/bridge.py`, linked from the guide modal. Verified with **TouchDesigner's own bundled Python 3.11** against the live hosted page: dropped a `.toe`, imported 23 nodes 96% through the Python bridge, CJK filename handled, PNA preflight present.
 - Guide modal now offers three tiers in order — `npx webtoe`, download `bridge.py`, manual `toeexpand` — and keeps polling so any of them continues the dialog on its own.
 - +1 test suite (`bridge-py`, protocol parity, auto-skips without python3): **86 tests**. docs/PUBLISH.md gains the visitor-tier map.
+
+## 2026-08-01 — POP family, TD-style backdrop, CHOP instancing (driven by real projects)
+
+Dogfooding two of the user's own sketches exposed what "imports fine but does
+nothing" actually meant.
+
+- **POP family** (TD 2025 GPU point operators): a 2025 project was 38% POP
+  nodes, all stubs. POPs carry geometry like SOPs, so faithful counterparts now
+  run on the SOP implementations; attribute-only/analysis POPs pass through;
+  dynamics stay stubs; unmapped POPs degrade to `sop:stub` so the chain holds.
+  **43% → 73% runnable.**
+- **Network backdrop** (TD-style output behind the nodes). First attempt painted
+  into the GL compositor — which sits *above* the node DOM (that is how thumbs
+  paint), so it covered every label. It now owns a 2D canvas under `.wt-world`,
+  fed by a throttled readback. Toggle `d`; `i` enters a COMP, `u` goes up.
+- **Fixed a self-inflicted bug**: adding `u_opacity` to the shared `__blit`
+  program broke `readPixels` (an unset uniform reads 0 → every readback black).
+  Lesson: adding a uniform to a shared program means auditing every call site.
+- **CHOP-channel instancing** on `comp:geo` — TD's dominant particle technique
+  (instanceop → CHOP, one channel per transform component). Was SOP-points only.
+
+### NEXT — make the 2022 DNA sketch render (open, precisely scoped)
+
+It imports at 74% with zero node errors and decodes in-browser in ~3 ms, but
+both Render TOPs are black. Remaining chain, in order:
+
+1. **`chop:sopto`** (SOP → CHOP channels) is unimplemented, so `merge2` carries
+   one 1-sample channel instead of the tx/ty/tz arrays the instancing reads.
+   This is the blocking piece.
+2. **`geo1` has no base geometry** — it contains only `in1`/`out1` (`sop:in`
+   with no source). Determine what TD feeds it before inventing a fallback.
+3. `SOP:twist` (×2) and `SOP:filein` (×3) still stub; `filein` needs external
+   model files, which `.toe` does not embed.
+4. Then verify `mat:pointsprite` against the reference render.
