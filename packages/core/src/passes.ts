@@ -37,6 +37,11 @@ export interface BlitRect {
   w: number;
   h: number;
   clip?: { x: number; y: number; w: number; h: number };
+  /** 1 = opaque (default). Below 1 the blit is dimmed and does NOT clear the
+   *  region first — used for the TouchDesigner-style network backdrop. */
+  opacity?: number;
+  /** 'contain' (default) letterboxes; 'cover' fills the rect. */
+  fit?: 'contain' | 'cover';
 }
 
 export interface GpuFacade {

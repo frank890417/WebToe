@@ -41,7 +41,8 @@ precision highp float;
 in vec2 v_uv;
 out vec4 fragColor;
 uniform sampler2D u_tex0;
-void main() { fragColor = texture(u_tex0, v_uv); }`;
+uniform float u_opacity;   // 1.0 for normal blits; <1 dims the network backdrop
+void main() { fragColor = texture(u_tex0, v_uv) * u_opacity; }`;
 
 let nextHandleId = 1;
 
@@ -205,11 +206,16 @@ export class WebGL2Backend implements GpuFacade {
     }
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(Math.round(clip.x), Math.round(ch - clip.y - clip.h), Math.round(clip.w), Math.round(clip.h));
-    gl.clearColor(0.06, 0.06, 0.08, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    const opacity = rect?.opacity ?? 1;
+    if (opacity >= 1) {
+      gl.clearColor(0.06, 0.06, 0.08, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
 
-    // contain-fit letterbox inside the rect
-    const scale = Math.min(r.w / tex.width, r.h / tex.height);
+    // cover (network backdrop) or contain-fit letterbox (viewer/thumbs)
+    const scale = rect?.fit === 'cover'
+      ? Math.max(r.w / tex.width, r.h / tex.height)
+      : Math.min(r.w / tex.width, r.h / tex.height);
     const w = Math.max(1, Math.round(tex.width * scale));
     const h = Math.max(1, Math.round(tex.height * scale));
     const vx = Math.round(r.x + (r.w - w) / 2);
@@ -221,6 +227,8 @@ export class WebGL2Backend implements GpuFacade {
     gl.bindTexture(gl.TEXTURE_2D, this.textures.get(tex.id) ?? null);
     const loc = this.loc(prog, 'u_tex0');
     if (loc) gl.uniform1i(loc, 0);
+    const oloc = this.loc(prog, 'u_opacity');
+    if (oloc) gl.uniform1f(oloc, opacity);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
   }

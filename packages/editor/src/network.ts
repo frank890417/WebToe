@@ -32,6 +32,7 @@ export class NetworkView {
       onStructureChange(): void;
       onEnterNetwork(comp: NodeInst): void;
       toast(msg: string): void;
+      onToggleBackdrop(): void;
     },
   ) {
     this.current = engine.graph.root;
@@ -53,7 +54,7 @@ export class NetworkView {
 
     const hint = document.createElement('div');
     hint.className = 'wt-hint';
-    hint.textContent = 'tab/double-click: add op · drag dot→dot: wire · double-click comp: enter · u: up · d: display · ⌫: delete';
+    hint.textContent = 'tab/double-click: add op · drag dot→dot: wire · i: enter comp · u: up · d: backdrop · shift-D: display · ⌫: delete';
     el.appendChild(hint);
 
     this.palette = new Palette(el, (type) => this.createAt(type));
@@ -98,8 +99,11 @@ export class NetworkView {
     // computing a transform from zeros and parking the whole patch off-screen.
     if (vw < 2 || vh < 2) { this.pendingFrame = true; return; }
     this.pendingFrame = false;
+    // Real TD layouts scatter a few nodes far from the cluster; fitting all of
+    // them can shrink everything to specks. Clamp to a readable floor and let
+    // the user pan — a legible partial view beats an illegible complete one.
     const k = Math.min(1, (vw - pad * 2) / Math.max(1, maxX - minX), (vh - pad * 2) / Math.max(1, maxY - minY));
-    this.tf.k = Math.max(0.05, k);
+    this.tf.k = Math.max(0.35, k);
     this.tf.x = (vw - (maxX - minX) * this.tf.k) / 2 - minX * this.tf.k;
     this.tf.y = (vh - (maxY - minY) * this.tf.k) / 2 - minY * this.tf.k;
     this.applyTransform();
@@ -440,8 +444,18 @@ export class NetworkView {
         }
       } else if (e.key === 'u') {
         this.goUp();
-      } else if (e.key === 'd' && this.selected) {
-        this.toggleDisplay(this.selected);
+      } else if (e.key === 'i') {
+        // enter the selected COMP — the counterpart to `u`
+        if (this.selected?.children) {
+          this.setNetwork(this.selected);
+          this.callbacks.onEnterNetwork(this.selected);
+        } else {
+          this.callbacks.toast('select a COMP first (i enters, u goes up)');
+        }
+      } else if (e.key === 'd') {
+        this.callbacks.onToggleBackdrop();
+      } else if (e.key === 'D' && this.selected) {
+        this.toggleDisplay(this.selected);   // shift-D keeps the display flag
       } else if (e.key === 'Escape') {
         this.palette.close();
       }

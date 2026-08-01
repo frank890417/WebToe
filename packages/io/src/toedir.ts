@@ -76,6 +76,36 @@ const TYPE_MAP: Record<string, string> = {
   'CHOP:merge': 'chop:merge',
   'CHOP:select': 'chop:select',
   'CHOP:null': 'chop:merge', // passthrough approximation
+  // ---- POP family (TD 2025 GPU point operators).
+  // POPs and SOPs are both point/primitive geometry, so the ones with a
+  // faithful counterpart run on WebToe's SOP implementations. Attribute-only
+  // and analysis POPs pass geometry through rather than breaking the chain;
+  // genuine dynamics (particle, forces) stay stubs — see docs/TD-PARITY.md.
+  'POP:circle': 'sop:circle',
+  'POP:line': 'sop:line',
+  'POP:rectangle': 'sop:rectangle',
+  'POP:sphere': 'sop:sphere',
+  'POP:tube': 'sop:tube',
+  'POP:grid': 'sop:grid',
+  'POP:box': 'sop:box',
+  'POP:torus': 'sop:torus',
+  'POP:merge': 'sop:merge',
+  'POP:transform': 'sop:transform',
+  'POP:noise': 'sop:noise',
+  'POP:copy': 'sop:copy',
+  'POP:skin': 'sop:skin',
+  'POP:point': 'sop:point',
+  'POP:switch': 'sop:switch',
+  'POP:null': 'sop:null',
+  'POP:in': 'sop:in',
+  'POP:out': 'sop:out',
+  'POP:normal': 'sop:facet',      // recomputes normals
+  // passthrough approximations: they modify attributes, not topology
+  'POP:attribute': 'sop:null',
+  'POP:convert': 'sop:null',
+  'POP:mathcombine': 'sop:null',
+  'POP:connectivity': 'sop:null',
+  'POP:linemetrics': 'sop:null',
   'COMP:container': 'comp:container',
   'COMP:base': 'comp:container',
   'COMP:null': 'comp:container',
@@ -312,7 +342,10 @@ const STUB_FOR: Record<string, string> = {
   TOP: 'top:stub',
   CHOP: 'chop:stub',
   SOP: 'sop:stub',
-  POP: 'comp:stub',
+  // POPs are TD 2025's GPU point/particle family. They carry geometry exactly
+  // like SOPs do, so an unmapped POP degrades to a SOP stub — that keeps the
+  // geometry chain connected instead of severing it at a COMP stub.
+  POP: 'sop:stub',
   MAT: 'mat:stub',
   COMP: 'comp:stub',
   DAT: 'dat:stub',
