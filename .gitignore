@@ -10,3 +10,6 @@ dist/
 # committed original test fixture (see tests/fixtures/README.md)
 !tests/fixtures/tiny.toe
 packages/bridge/public/
+
+# reverse-engineering notes, oracle files, test records — never publish (哲宇 directive 2026-08-01)
+private/
