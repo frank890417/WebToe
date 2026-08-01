@@ -9,6 +9,7 @@ layout(location=2) in vec2 a_uv;
 layout(location=3) in vec4 a_cd;
 layout(location=4) in vec3 i_off;
 layout(location=5) in vec4 i_cd;
+layout(location=6) in vec3 i_scale;
 uniform mat4 u_model, u_view, u_proj;
 uniform float u_hasInstance;
 uniform float u_pointSize;
@@ -17,14 +18,17 @@ out vec2 v_uv;
 out vec4 v_cd;
 out vec3 v_wpos;
 void main() {
-  vec3 p = a_pos + (u_hasInstance > 0.5 ? i_off : vec3(0.0));
+  bool inst = u_hasInstance > 0.5;
+  vec3 p = a_pos * (inst ? i_scale : vec3(1.0)) + (inst ? i_off : vec3(0.0));
   vec4 w = u_model * vec4(p, 1.0);
   v_wpos = w.xyz;
   v_n = mat3(u_model) * a_n;
   v_uv = a_uv;
-  v_cd = a_cd * (u_hasInstance > 0.5 ? i_cd : vec4(1.0));
+  v_cd = a_cd * (inst ? i_cd : vec4(1.0));
   gl_Position = u_proj * u_view * w;
-  gl_PointSize = u_pointSize;
+  // point sprites take their size from the instance scale too, which is how
+  // CHOP-driven particle rigs vary dot size
+  gl_PointSize = u_pointSize * (inst ? max(i_scale.x, 0.0) : 1.0);
 }`;
 
 const FRAG_UNLIT = `#version 300 es
@@ -191,25 +195,35 @@ export class SceneRenderer {
       this.uniform(p, 'u_hasInstance', instanced ? 1 : 0);
       if (instanced) {
         const inst = draw.instances!;
-        const interleaved = new Float32Array(inst.count * 7);
+        const STRIDE_F = 10;                       // translate3 + colour4 + scale3
+        const interleaved = new Float32Array(inst.count * STRIDE_F);
         for (let i = 0; i < inst.count; i++) {
-          interleaved.set(inst.translate.subarray(i * 3, i * 3 + 3), i * 7);
-          if (inst.color) interleaved.set(inst.color.subarray(i * 4, i * 4 + 4), i * 7 + 3);
-          else interleaved.set([1, 1, 1, 1], i * 7 + 3);
+          const b = i * STRIDE_F;
+          interleaved.set(inst.translate.subarray(i * 3, i * 3 + 3), b);
+          if (inst.color) interleaved.set(inst.color.subarray(i * 4, i * 4 + 4), b + 3);
+          else interleaved.set([1, 1, 1, 1], b + 3);
+          if (inst.scale) interleaved.set(inst.scale.subarray(i * 3, i * 3 + 3), b + 7);
+          else interleaved.set([1, 1, 1], b + 7);
         }
+        const STRIDE_B = STRIDE_F * 4;
         gl.bindBuffer(gl.ARRAY_BUFFER, cached.instBuf);
         gl.bufferData(gl.ARRAY_BUFFER, interleaved, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(4);
-        gl.vertexAttribPointer(4, 3, gl.FLOAT, false, 28, 0);
+        gl.vertexAttribPointer(4, 3, gl.FLOAT, false, STRIDE_B, 0);
         gl.vertexAttribDivisor(4, 1);
         gl.enableVertexAttribArray(5);
-        gl.vertexAttribPointer(5, 4, gl.FLOAT, false, 28, 12);
+        gl.vertexAttribPointer(5, 4, gl.FLOAT, false, STRIDE_B, 12);
         gl.vertexAttribDivisor(5, 1);
+        gl.enableVertexAttribArray(6);
+        gl.vertexAttribPointer(6, 3, gl.FLOAT, false, STRIDE_B, 28);
+        gl.vertexAttribDivisor(6, 1);
       } else {
         gl.disableVertexAttribArray(4);
         gl.vertexAttrib3f(4, 0, 0, 0);
         gl.disableVertexAttribArray(5);
         gl.vertexAttrib4f(5, 1, 1, 1, 1);
+        gl.disableVertexAttribArray(6);
+        gl.vertexAttrib3f(6, 1, 1, 1);
       }
       const count = instanced ? draw.instances!.count : 1;
 

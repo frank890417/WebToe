@@ -75,6 +75,9 @@ export const objOps: OpSpec[] = [
       { key: 'instancetx', label: 'tx channel', type: 'string', default: 'tx', page: 'instance' },
       { key: 'instancety', label: 'ty channel', type: 'string', default: 'ty', page: 'instance' },
       { key: 'instancetz', label: 'tz channel', type: 'string', default: 'tz', page: 'instance' },
+      { key: 'instancesx', label: 'sx channel', type: 'string', default: '', page: 'instance' },
+      { key: 'instancesy', label: 'sy channel', type: 'string', default: '', page: 'instance' },
+      { key: 'instancesz', label: 'sz channel', type: 'string', default: '', page: 'instance' },
       { key: 'instancer', label: 'r channel', type: 'string', default: '', page: 'instance' },
       { key: 'instanceg', label: 'g channel', type: 'string', default: '', page: 'instance' },
       { key: 'instanceb', label: 'b channel', type: 'string', default: '', page: 'instance' },
@@ -120,6 +123,12 @@ export const objOps: OpSpec[] = [
           const chan = (name: string) => (name
             ? so.channels.find((c) => c.name === name)?.data ?? null
             : null);
+          // TD holds a channel's last sample when it is shorter than the
+          // instance count — that is what lets a single-sample channel drive
+          // every instance (very common for a shared scale or tint).
+          const at = (d: Float32Array | null, i: number, fallback: number) =>
+            (d && d.length ? d[Math.min(i, d.length - 1)] : fallback);
+
           const tx = chan(ctx.paramStr('instancetx'));
           const ty = chan(ctx.paramStr('instancety'));
           const tz = chan(ctx.paramStr('instancetz'));
@@ -127,10 +136,11 @@ export const objOps: OpSpec[] = [
           if (count > 0) {
             const translate = new Float32Array(count * 3);
             for (let i = 0; i < count; i++) {
-              translate[i * 3] = tx?.[i] ?? 0;
-              translate[i * 3 + 1] = ty?.[i] ?? 0;
-              translate[i * 3 + 2] = tz?.[i] ?? 0;
+              translate[i * 3] = at(tx, i, 0);
+              translate[i * 3 + 1] = at(ty, i, 0);
+              translate[i * 3 + 2] = at(tz, i, 0);
             }
+
             const cr = chan(ctx.paramStr('instancer'));
             const cg = chan(ctx.paramStr('instanceg'));
             const cb = chan(ctx.paramStr('instanceb'));
@@ -139,13 +149,26 @@ export const objOps: OpSpec[] = [
             if (cr || cg || cb || ca) {
               color = new Float32Array(count * 4);
               for (let i = 0; i < count; i++) {
-                color[i * 4] = cr?.[i] ?? 1;
-                color[i * 4 + 1] = cg?.[i] ?? 1;
-                color[i * 4 + 2] = cb?.[i] ?? 1;
-                color[i * 4 + 3] = ca?.[i] ?? 1;
+                color[i * 4] = at(cr, i, 1);
+                color[i * 4 + 1] = at(cg, i, 1);
+                color[i * 4 + 2] = at(cb, i, 1);
+                color[i * 4 + 3] = at(ca, i, 1);
               }
             }
-            instances = { count, translate, color };
+
+            const sx = chan(ctx.paramStr('instancesx'));
+            const sy = chan(ctx.paramStr('instancesy'));
+            const sz = chan(ctx.paramStr('instancesz'));
+            let scale: Float32Array | undefined;
+            if (sx || sy || sz) {
+              scale = new Float32Array(count * 3);
+              for (let i = 0; i < count; i++) {
+                scale[i * 3] = at(sx, i, 1);
+                scale[i * 3 + 1] = at(sy, i, 1);
+                scale[i * 3 + 2] = at(sz, i, 1);
+              }
+            }
+            instances = { count, translate, color, scale };
           }
         }
       }

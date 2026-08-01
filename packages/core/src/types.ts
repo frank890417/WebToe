@@ -88,7 +88,7 @@ export interface SceneObject {
   geo?: GeometryData;
   geoKey?: string;
   material?: MaterialSpec;
-  instances?: { count: number; translate: Float32Array; color?: Float32Array };
+  instances?: { count: number; translate: Float32Array; color?: Float32Array; scale?: Float32Array };
   camera?: { view: Float32Array; proj: Float32Array };
   light?: SceneLight;
 }

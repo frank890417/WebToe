@@ -80,7 +80,7 @@ export interface SceneDraw {
   geoKey: string;
   model: Float32Array;
   material: import('./types').MaterialSpec;
-  instances?: { count: number; translate: Float32Array; color?: Float32Array };
+  instances?: { count: number; translate: Float32Array; color?: Float32Array; scale?: Float32Array };
 }
 
 export interface ScenePassSpec {
