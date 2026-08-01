@@ -180,3 +180,44 @@ both Render TOPs are black. Remaining chain, in order:
 3. `SOP:twist` (×2) and `SOP:filein` (×3) still stub; `filein` needs external
    model files, which `.toe` does not embed.
 4. Then verify `mat:pointsprite` against the reference render.
+
+## 2026-08-02 — the 2022 DNA sketch renders, in colour, decoded in-browser
+
+Goal was "opens fully and looks close to TouchDesigner". It does now.
+
+Traced the project's real chain instead of guessing, which turned "black
+render" into five specific gaps:
+
+```
+grid1 -> twist1 -> noise3 -\
+                            merge1 -> sopto1 -> merge2 -> geo1 (4200 instances)
+grid1 -> twist2 -> noise4 -/                                  |
+                                        cam1 -> render1 -> lookup1 <- ramp1(keys DAT)
+```
+
+1. **sop:twist** — a twisted grid *is* the double helix; animating the pivot
+   sends the twist travelling. Entirely procedural: no external geometry, so
+   the `SOP:filein` stubs turned out to be irrelevant to the visual.
+2. **chop:sopto** — one sample per point as tx/ty/tz (+rgba), the bridge that
+   lets geometry drive instancing.
+3. **comp:geo CHOP-channel instancing** — TD's dominant particle technique;
+   WebToe had SOP-points only.
+4. **Node flags were never parsed.** TD keeps render/display/bypass on the `.n`
+   `flags =` line, and the Render TOP only draws Geo COMPs whose render flag is
+   on — so a byte-perfect import still drew nothing. This one would have
+   silently broken every 3D project.
+5. **top:lookup + ramps that read their keys DAT** — the palette lives in a
+   `pos r g b a` table, not in the colour parameters.
+
+Measured: 108 nodes, **78% runnable**, 4200 live instances, 234 files decoded
+in-browser in ~3 ms, and the output matches the reference render's palette
+(black → deep blue → teal → green → orange → pale blue).
+
+### NEXT
+
+- Per-instance **scale** (`instancesx/sy/sz`): the renderer's instance buffer
+  packs translate+colour only; adding scale means a 4th vertex attribute.
+- `mat:pointsprite` point sizing, for dot-size variation.
+- `SOP:filein` (external models) and `CHOP:audiospect` remain stubs — neither
+  affects this sketch.
+- POPs: mapped for import, but the dynamics (particle/force) still stub.
