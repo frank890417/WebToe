@@ -69,7 +69,16 @@ export const objOps: OpSpec[] = [
       { key: 'material', label: 'material (MAT path)', type: 'string', default: '', page: 'render' },
       { key: 'render', type: 'toggle', default: true, page: 'render' },
       { key: 'instancing', type: 'toggle', default: false, page: 'instance' },
-      { key: 'instanceop', label: 'instance SOP (points)', type: 'string', default: '', page: 'instance' },
+      { key: 'instanceop', label: 'instance op (SOP points or CHOP channels)', type: 'string', default: '', page: 'instance' },
+      // CHOP-driven instancing: TD names the channel per transform component.
+      // This is how most TouchDesigner particle/point-cloud work is built.
+      { key: 'instancetx', label: 'tx channel', type: 'string', default: 'tx', page: 'instance' },
+      { key: 'instancety', label: 'ty channel', type: 'string', default: 'ty', page: 'instance' },
+      { key: 'instancetz', label: 'tz channel', type: 'string', default: 'tz', page: 'instance' },
+      { key: 'instancer', label: 'r channel', type: 'string', default: '', page: 'instance' },
+      { key: 'instanceg', label: 'g channel', type: 'string', default: '', page: 'instance' },
+      { key: 'instanceb', label: 'b channel', type: 'string', default: '', page: 'instance' },
+      { key: 'instancea', label: 'a channel', type: 'string', default: '', page: 'instance' },
     ],
     cook(ctx) {
       // geometry = out-tunnel SOP child, else display-flagged, else first SOP child
@@ -93,9 +102,43 @@ export const objOps: OpSpec[] = [
       if (ctx.paramBool('instancing')) {
         const src = resolveParamPath(ctx, ctx.paramStr('instanceop'));
         const so = src ? ctx.engine.cook(src) : null;
-        const ig = so && so.kind === 'sop' ? so.geo : null;
-        if (ig && ig.P.length) {
-          instances = { count: ig.P.length / 3, translate: ig.P, color: ig.Cd };
+        if (so && so.kind === 'sop' && so.geo.P.length) {
+          // instance one copy per point of a SOP
+          instances = { count: so.geo.P.length / 3, translate: so.geo.P, color: so.geo.Cd };
+        } else if (so && so.kind === 'chop' && so.channels.length) {
+          // instance one copy per CHOP sample, transforms read from named
+          // channels (TD's `instancetx` etc.). Missing channel = 0 / opaque
+          // white, matching TD's behaviour for an unassigned component.
+          const chan = (name: string) => (name
+            ? so.channels.find((c) => c.name === name)?.data ?? null
+            : null);
+          const tx = chan(ctx.paramStr('instancetx'));
+          const ty = chan(ctx.paramStr('instancety'));
+          const tz = chan(ctx.paramStr('instancetz'));
+          const count = Math.max(tx?.length ?? 0, ty?.length ?? 0, tz?.length ?? 0);
+          if (count > 0) {
+            const translate = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+              translate[i * 3] = tx?.[i] ?? 0;
+              translate[i * 3 + 1] = ty?.[i] ?? 0;
+              translate[i * 3 + 2] = tz?.[i] ?? 0;
+            }
+            const cr = chan(ctx.paramStr('instancer'));
+            const cg = chan(ctx.paramStr('instanceg'));
+            const cb = chan(ctx.paramStr('instanceb'));
+            const ca = chan(ctx.paramStr('instancea'));
+            let color: Float32Array | undefined;
+            if (cr || cg || cb || ca) {
+              color = new Float32Array(count * 4);
+              for (let i = 0; i < count; i++) {
+                color[i * 4] = cr?.[i] ?? 1;
+                color[i * 4 + 1] = cg?.[i] ?? 1;
+                color[i * 4 + 2] = cb?.[i] ?? 1;
+                color[i * 4 + 3] = ca?.[i] ?? 1;
+              }
+            }
+            instances = { count, translate, color };
+          }
         }
       }
 

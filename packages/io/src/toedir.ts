@@ -253,6 +253,14 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     render: { to: 'render' },
     instancing: { to: 'instancing' },
     instanceop: { to: 'instanceop' },
+    // CHOP-driven instancing: TD stores the channel name per component
+    instancetx: { to: 'instancetx' },
+    instancety: { to: 'instancety' },
+    instancetz: { to: 'instancetz' },
+    instancer: { to: 'instancer' },
+    instanceg: { to: 'instanceg' },
+    instanceb: { to: 'instanceb' },
+    instancea: { to: 'instancea' },
   },
   'COMP:cam': {
     ...XFORM_RULES,
