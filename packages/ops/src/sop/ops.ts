@@ -199,6 +199,63 @@ export const sopOps: OpSpec[] = [
   },
 
   {
+    /**
+     * Twist SOP — rotates points progressively around an axis, the amount
+     * scaling with position along that axis. A twisted grid is exactly how a
+     * double-helix ribbon is built in TouchDesigner.
+     *
+     * TD tokens: `strength` is total degrees across the extent; `px/py/pz`
+     * shift the point where twist is zero (animating px sends the twist
+     * travelling along the axis).
+     */
+    type: 'sop:twist',
+    family: F,
+    label: 'twist',
+    inputs: { min: 1, max: 1 },
+    alwaysCook: true,
+    params: [
+      { key: 'strength', label: 'degrees', type: 'float', default: 90, min: -1080, max: 1080 },
+      { key: 'axis', type: 'menu', default: 'x', menu: ['x', 'y', 'z'] },
+      { key: 'px', type: 'float', default: 0, min: -10, max: 10 },
+      { key: 'py', type: 'float', default: 0, min: -10, max: 10 },
+      { key: 'pz', type: 'float', default: 0, min: -10, max: 10 },
+    ],
+    cook(ctx) {
+      const g = G.asSop(ctx.inputs[0]);
+      if (!g) return { kind: 'sop', geo: G.emptyGeo() };
+      const P = new Float32Array(g.P);
+      const n = P.length / 3;
+      if (!n) return { kind: 'sop', geo: g };
+
+      const axis = ctx.paramStr('axis');
+      const ai = axis === 'y' ? 1 : axis === 'z' ? 2 : 0;   // twist axis
+      const b1 = (ai + 1) % 3, b2 = (ai + 2) % 3;           // plane rotated in
+      const pivot = [ctx.paramNum('px'), ctx.paramNum('py'), ctx.paramNum('pz')];
+
+      // normalise position along the axis so `strength` means total degrees
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const v = P[i * 3 + ai];
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      const span = hi - lo || 1;
+      const total = (ctx.paramNum('strength') * Math.PI) / 180;
+
+      for (let i = 0; i < n; i++) {
+        const t = (P[i * 3 + ai] - lo) / span + pivot[ai];
+        const a = total * t;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const u = P[i * 3 + b1] - pivot[b1];
+        const v = P[i * 3 + b2] - pivot[b2];
+        P[i * 3 + b1] = u * ca - v * sa + pivot[b1];
+        P[i * 3 + b2] = u * sa + v * ca + pivot[b2];
+      }
+      return { kind: 'sop', geo: { ...g, P, version: (g.version ?? 0) + 1 } };
+    },
+  },
+
+  {
     type: 'sop:noise',
     family: F,
     label: 'noise',

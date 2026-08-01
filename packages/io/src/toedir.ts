@@ -75,6 +75,7 @@ const TYPE_MAP: Record<string, string> = {
   'CHOP:mousein': 'chop:mousein',
   'CHOP:merge': 'chop:merge',
   'CHOP:select': 'chop:select',
+  'CHOP:sopto': 'chop:sopto',
   'CHOP:null': 'chop:merge', // passthrough approximation
   // ---- POP family (TD 2025 GPU point operators).
   // POPs and SOPs are both point/primitive geometry, so the ones with a
@@ -130,6 +131,7 @@ const TYPE_MAP: Record<string, string> = {
   'SOP:add': 'sop:add',
   'SOP:point': 'sop:point',
   'SOP:facet': 'sop:facet',
+  'SOP:twist': 'sop:twist',
   'SOP:switch': 'sop:switch',
   'SOP:null': 'sop:null',
   'SOP:in': 'sop:in',
@@ -262,6 +264,11 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     instanceb: { to: 'instanceb' },
     instancea: { to: 'instancea' },
   },
+  'CHOP:sopto': { sop: { to: 'sop' } },
+  'SOP:twist': {
+    strength: { to: 'strength' },
+    px: { to: 'px' }, py: { to: 'py' }, pz: { to: 'pz' },
+  },
   'COMP:cam': {
     ...XFORM_RULES,
     lookat: { to: 'lookat' },
@@ -369,6 +376,8 @@ interface RawNode {
   family: string;
   tile: { x: number; y: number };
   comment?: string;
+  /** from the `.n` `flags = …` line: render/display/bypass toggles */
+  flags: { render: boolean; display: boolean; bypass: boolean };
   inputs: { index: number; source: string }[];
   parms: Map<string, { mode: number; rest: string }>;
   text?: string;
@@ -381,6 +390,10 @@ function parseNodeFile(text: string): Omit<RawNode, 'name' | 'parms'> {
   let family = '';
   const tile = { x: 0, y: 0 };
   let comment: string | undefined;
+  // TD keeps render/display/bypass on the node's flags line, NOT in .parm.
+  // The Render TOP only draws Geo COMPs whose `render` flag is on, so losing
+  // this line means a correct import still renders nothing.
+  const flags = { render: false, display: false, bypass: false };
   const inputs: { index: number; source: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
     const L = lines[i].trim();
@@ -392,6 +405,11 @@ function parseNodeFile(text: string): Omit<RawNode, 'name' | 'parms'> {
       const [x, y] = L.slice(5).trim().split(/\s+/).map(Number);
       tile.x = x || 0;
       tile.y = y || 0;
+    } else if (L.startsWith('flags ')) {
+      const f = L.slice(6).replace(/^=\s*/, '');
+      flags.render = /\brender on\b/.test(f);
+      flags.display = /\bdisplay on\b/.test(f);
+      flags.bypass = /\bbypass on\b/.test(f);
     } else if (L.startsWith('comment ')) {
       comment = L.slice(8).replace(/^"|"$/g, '');
     } else if (L === 'inputs') {
@@ -402,7 +420,7 @@ function parseNodeFile(text: string): Omit<RawNode, 'name' | 'parms'> {
       }
     }
   }
-  return { tdType, family, tile, comment, inputs };
+  return { tdType, family, tile, comment, flags, inputs };
 }
 
 function parseParmFile(text: string): Map<string, { mode: number; rest: string }> {
@@ -507,9 +525,15 @@ export const toedirLoader: ProjectLoader = {
         };
         if (!mapped) nj.foreignType = raw.tdType;
         if (raw.text !== undefined) nj.text = raw.text;
+        if (raw.flags.display || raw.flags.bypass) {
+          nj.flags = { display: raw.flags.display, bypass: raw.flags.bypass };
+        }
 
         // params
         const params: Record<string, ParamValueJSON> = {};
+        // TD stores a Geo COMP's render toggle on the flags line; WebToe models
+        // it as a param, and the Render TOP filters on it.
+        if (type === 'comp:geo') params.render = { mode: 'const', value: raw.flags.render };
         for (const [k, v] of Object.entries(TYPE_PRESETS[raw.tdType] ?? {})) {
           params[k] = { mode: 'const', value: v };
         }

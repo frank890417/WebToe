@@ -1,10 +1,65 @@
-import type { OpSpec, ChannelSet, Channel } from '@webtoe/core';
+import type { OpSpec, ChannelSet, Channel, CookCtx, NodeInst } from '@webtoe/core';
 import { channels, asChop, CONTROL_RATE } from './data';
 import { kernels, type LfoShape } from './kernels';
 
 const F = 'CHOP' as const;
 
+/** Resolve a node-parameter path TD-style (relative to the node's network). */
+function resolveParamPath(ctx: CookCtx, path: string): NodeInst | null {
+  if (!path) return null;
+  if (path.startsWith('./')) return ctx.engine.graph.resolve(path.slice(2), ctx.node);
+  return ctx.engine.graph.resolve(path, ctx.node.parent ?? ctx.node);
+}
+
 export const chopOps: OpSpec[] = [
+  {
+    /**
+     * SOP to CHOP — one sample per point, positions as `tx`/`ty`/`tz`
+     * (plus `r`/`g`/`b`/`a` when the geometry carries colour).
+     *
+     * This is the bridge that lets geometry drive instancing: a SOP builds the
+     * shape, this turns its points into channels, and a Geo COMP instances
+     * across them. Referenced by path (TD's `sop` parameter), not wired.
+     */
+    type: 'chop:sopto',
+    family: F,
+    label: 'sop to',
+    inputs: { min: 0, max: 1 },
+    alwaysCook: true,
+    params: [
+      { key: 'sop', label: 'sop (path)', type: 'string', default: '' },
+    ],
+    cook(ctx) {
+      // explicit path first, then a wired input (TD allows either)
+      const src = resolveParamPath(ctx, ctx.paramStr('sop'));
+      const out = src ? ctx.engine.cook(src) : ctx.inputs[0];
+      const geo = out && out.kind === 'sop' ? out.geo : null;
+      const n = geo ? geo.P.length / 3 : 0;
+      if (!geo || !n) return { kind: 'chop', rate: CONTROL_RATE, channels: [] };
+
+      const tx = new Float32Array(n), ty = new Float32Array(n), tz = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        tx[i] = geo.P[i * 3];
+        ty[i] = geo.P[i * 3 + 1];
+        tz[i] = geo.P[i * 3 + 2];
+      }
+      const chans: Channel[] = [
+        { name: 'tx', data: tx }, { name: 'ty', data: ty }, { name: 'tz', data: tz },
+      ];
+      if (geo.Cd && geo.Cd.length >= n * 4) {
+        const r = new Float32Array(n), g = new Float32Array(n);
+        const b = new Float32Array(n), a = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          r[i] = geo.Cd[i * 4]; g[i] = geo.Cd[i * 4 + 1];
+          b[i] = geo.Cd[i * 4 + 2]; a[i] = geo.Cd[i * 4 + 3];
+        }
+        chans.push({ name: 'r', data: r }, { name: 'g', data: g },
+          { name: 'b', data: b }, { name: 'a', data: a });
+      }
+      return { kind: 'chop', rate: CONTROL_RATE, channels: chans };
+    },
+  },
+
   {
     type: 'chop:constant',
     family: F,

@@ -88,7 +88,15 @@ export const objOps: OpSpec[] = [
         ?? sopKids.find((k) => k.flags.display)
         ?? sopKids[sopKids.length - 1];
       const out = target ? ctx.engine.cook(target) : null;
-      const geo = out && out.kind === 'sop' ? out.geo : null;
+      let geo = out && out.kind === 'sop' ? out.geo : null;
+      // A Geo COMP whose SOP contents are empty renders nothing — except when
+      // it is instancing, where TouchDesigner still draws one copy of the base
+      // per instance. Point-sprite particle rigs routinely leave the base empty
+      // (the visible dot comes from the material), so fall back to a single
+      // point rather than dropping the whole instanced draw.
+      if ((!geo || !geo.P.length) && ctx.paramBool('instancing')) {
+        geo = { P: Float32Array.of(0, 0, 0), renderPoints: true, version: 0 };
+      }
       if (!geo) return null;
 
       let material = DEFAULT_MAT;
