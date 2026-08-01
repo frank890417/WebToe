@@ -40,7 +40,9 @@ npx webtoe        # serves the app locally and opens it — then just drag your 
 
 A `.toe` is a proprietary compressed container that no browser can decode (see [RESEARCH §1](docs/RESEARCH.md)). The one step that genuinely needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — therefore runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
 
-Already using the hosted app? Run the bridge alone in a terminal and the hosted page will find it. With no bridge at all, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
+**No Node?** Every TouchDesigner install ships Python, so the same bridge is one stdlib-only file. Download [`bridge.py`](https://frank890417.github.io/WebToe/bridge.py) (the guide modal links it), then `python3 bridge.py` (TD's bundled interpreter works too) and drop your `.toe` on the hosted page. Protocol-identical to `npx webtoe`.
+
+Already using the hosted app with Node? Run the bridge alone in a terminal and the hosted page will find it. With no bridge at all, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
 
 ```bash
 # bridge only, for the hosted app at frank890417.github.io/WebToe

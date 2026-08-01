@@ -35,6 +35,16 @@ Read these before flipping that switch:
 - **Privacy story changes**: the local bridge's pitch is "files never leave your machine". A shared converter receives other people's project files — say so on the page, keep nothing (the bridge already deletes every upload in `finally`), and prefer a token-gated link over an open endpoint.
 - HTTPS end to end (tunnel), or browsers will block the mixed-content fetch — only `127.0.0.1` is exempt.
 
+## Tiers a visitor actually lands in
+
+The hosted page (after push) auto-detects a bridge and imports straight through. When none is running, the guide modal offers, in order:
+
+1. **`npx webtoe`** — has Node (after npm publish).
+2. **`bridge.py`** — no Node, but has TouchDesigner (which ships Python). Single stdlib-only file, served at `/WebToe/bridge.py`, protocol-identical, linked from the modal. This covers the large share of TD users who never installed Node.
+3. **Manual `toeexpand` + folder drop** — no Node, doesn't want to run a script.
+
+All three converge on the same importer; the modal keeps polling, so starting any bridge continues the dialog on its own.
+
 ## The one thing none of this buys
 
 Pure-web zero-install `.toe` reading. The container is proprietary compression (three brute-force campaigns, RESEARCH §1); the only paths are reverse-engineering `libUT` (weeks, gray zone, disposable the day Derivative ships their announced JSON format) or waiting for that format. The importer already sits behind a `ProjectLoader` adapter so the official JSON slots in with zero engine changes.

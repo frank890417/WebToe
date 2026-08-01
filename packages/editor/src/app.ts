@@ -324,7 +324,15 @@ export class EditorApp {
       <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;margin:10px 0 4px;" title="click to copy">npx webtoe</pre>
       <div data-watch style="color:#9a9aa3;">waiting for the bridge on ${escapeHtml(DEFAULT_BRIDGE_URL)}… leave this open, it continues on its own.</div>
       <details style="margin-top:12px;">
-        <summary style="cursor:pointer;color:#9a9aa3;">no Node? expand it by hand instead</summary>
+        <summary style="cursor:pointer;color:#9a9aa3;">no Node? TouchDesigner ships Python — run the single-file bridge</summary>
+        <div style="margin:8px 0 4px;color:#9a9aa3;"><a href="bridge.py" download style="color:#cfc8ff;">download bridge.py</a>, then:</div>
+        <div style="margin:6px 0 4px;color:#9a9aa3;">macOS (any Python 3.8+, incl. TD's bundled one)</div>
+        <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">python3 ~/Downloads/bridge.py</pre>
+        <div style="margin:6px 0 4px;color:#9a9aa3;">Windows (uses TD's own Python; adjust the install path if needed)</div>
+        <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">"C:\\Program Files\\Derivative\\TouchDesigner\\bin\\python.exe" %USERPROFILE%\\Downloads\\bridge.py</pre>
+      </details>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;color:#9a9aa3;">or expand it by hand</summary>
         <div style="margin:8px 0 4px;color:#9a9aa3;">macOS</div>
         <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;" title="click to copy">${escapeHtml(macCmd)}</pre>
         <div style="margin:6px 0 4px;color:#9a9aa3;">Windows</div>
