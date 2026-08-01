@@ -35,11 +35,8 @@ WebToe is an original engine and editor built from scratch for the web. It is no
 **Drop a `.toe` on the page and it opens.** No CLI step, no folder shuffling.
 
 ```bash
-git clone https://github.com/frank890417/WebToe && cd WebToe && npm install
-npm run build && npm run bridge   # serves the app locally — open it and drag your .toe in
+npx webtoe        # serves the app locally and opens it — then just drag your .toe in
 ```
-
-(The bridge is not on npm yet, so today it runs from a checkout. Publishing it is what turns those three lines into a bare `npx webtoe`.)
 
 A `.toe` is a proprietary compressed container that no browser can decode (see [RESEARCH §1](docs/RESEARCH.md)). The one step that genuinely needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — therefore runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
 
@@ -47,7 +44,10 @@ Already using the hosted app? Run the bridge alone in a terminal and the hosted 
 
 ```bash
 # bridge only, for the hosted app at frank890417.github.io/WebToe
-node packages/bridge/index.mjs
+npx webtoe --no-open
+
+# share one bridge over LAN/Tailscale (e.g. TD on a Windows box, browsing elsewhere)
+npx webtoe --host 0.0.0.0 --token <secret>   # page: ?bridge=…&bridgeToken=<secret>
 
 # no Node? expand by hand, then drop the resulting .toe.dir folder on the page
 "/Applications/TouchDesigner.app/Contents/MacOS/toeexpand" myproject.toe

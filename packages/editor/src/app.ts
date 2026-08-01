@@ -321,9 +321,7 @@ export class EditorApp {
       <div><code>.toe</code> is a proprietary compressed binary — no browser can decode it. The one
       step that needs TouchDesigner runs on your machine, and once this is running it happens by
       itself every time you drop a file.</div>
-      <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;margin:10px 0 4px;" title="click to copy">git clone https://github.com/frank890417/WebToe
-cd WebToe &amp;&amp; npm install
-node packages/bridge/index.mjs</pre>
+      <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;margin:10px 0 4px;" title="click to copy">npx webtoe</pre>
       <div data-watch style="color:#9a9aa3;">waiting for the bridge on ${escapeHtml(DEFAULT_BRIDGE_URL)}… leave this open, it continues on its own.</div>
       <details style="margin-top:12px;">
         <summary style="cursor:pointer;color:#9a9aa3;">no Node? expand it by hand instead</summary>
