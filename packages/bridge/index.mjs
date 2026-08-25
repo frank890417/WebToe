@@ -186,7 +186,7 @@ if (isMain() || process.env.WEBTOE_FORCE_MAIN === '1') {
     const dist = findAppDist(flag('--app'));
     console.log(`webtoe ${VERSION} → http://${loopback ? '127.0.0.1' : host}:${port}`);
     console.log(tool ? `  toeexpand: ${tool}` : '  toeexpand: NOT FOUND — install TouchDesigner, or pass --toeexpand <path>');
-    console.log(dist ? '  serving the app — drop a .toe on the page and it opens' : '  bridge only — use it from https://frank890417.github.io/WebToe/');
+    console.log(dist ? '  serving the app — drop a .toe on the page and it opens' : '  bridge only — use it from https://webtoe.openaudiovisual.com/');
     if (!loopback && !token) {
       console.log('  ⚠️  bound beyond loopback with NO --token: anyone who can reach this port can run');
       console.log('     your toeexpand on files they upload. Set --token (see docs/PUBLISH.md §deploy).');

@@ -28,6 +28,33 @@ const editorPromise = mountEditor(app, {
   ],
 });
 
+// external control bridge — a host page (e.g. the open-audiovisual show
+// chassis) embeds this app in an iframe and drives patch expressions that
+// read ext('name'). Values are plain numbers; shape-checked, origin-agnostic
+// (same trust model as user-authored patches: numbers into expressions).
+import { setExternals } from '@webtoe/core';
+window.addEventListener('message', (e: MessageEvent) => {
+  const m = e.data as { type?: string; values?: Record<string, unknown>; url?: string };
+  if (m?.type === 'webtoe:ext' && m.values && typeof m.values === 'object') {
+    const clean: Record<string, number> = {};
+    for (const k of Object.keys(m.values)) {
+      const v = m.values[k];
+      if (typeof v === 'number' && Number.isFinite(v)) clean[k] = v;
+    }
+    setExternals(clean);
+  }
+  if (m?.type === 'webtoe:load' && typeof m.url === 'string') {
+    const url = m.url;                       // narrow before the async hop
+    void editorPromise.then((ed) => ed.loadUrl(url));
+  }
+});
+
+// ?project=<url> — load a project straight from a link (CORS permitting)
+const projectUrl = new URLSearchParams(location.search).get('project');
+if (projectUrl) {
+  void editorPromise.then((ed) => ed.loadUrl(projectUrl));
+}
+
 // debug/testing handle
 void editorPromise.then((editor) => {
   (window as unknown as { __webtoe: unknown }).__webtoe = editor;

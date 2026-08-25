@@ -13,7 +13,7 @@
 
 ## 1. State snapshot & the measured curve
 
-- **Live**: https://frank890417.github.io/WebToe/ (GitHub Pages via Actions; deploy = push to main).
+- **Live**: https://webtoe.openaudiovisual.com/ (was frank890417.github.io/WebToe) (GitHub Pages via Actions; deploy = push to main).
 - **Engine**: TOP(24)+CHOP(13)+SOP(19)+MAT(7)+object-COMPs+DAT(7) on a dual-backend pass contract — WebGL2 complete (2D passes + 3D scene renderer), WebGPU at 2D parity (3D scene pass pending). Expressions v2 (`.par`, `parent()`, ternary translation). Importer with ~90 type mappings, parameter/expression translation, honest stubs + report.
 - **The metric that matters** — corpus coverage (60 real projects, 28,698 nodes, private lab tooling):
   **32.3% (v1) → 47.1% (cycle 1: expressions v2 + routing ops + DAT-lite) → 62.3% (R3: 3D pipeline)**.

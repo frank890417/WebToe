@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileExpr, translateTdExpr, zeroNodeRef, type ExprScope, type NodeRef } from '@webtoe/core';
+import { compileExpr, translateTdExpr, zeroNodeRef, zeroScope, setExternal, setExternals, type ExprScope, type NodeRef } from '@webtoe/core';
 
 function refWith(channels: number, pars: Record<string, number | string> = {}): NodeRef {
   return new Proxy({ name: 'n', path: '/n' } as NodeRef, {
@@ -84,5 +84,16 @@ describe('TD Python translation', () => {
     expect(translateTdExpr("f'scripts/{me.name}.py'").ok).toBe(false);
     expect(translateTdExpr('1 if a else 2 if b else 3').ok).toBe(false); // nested conditional
     expect(translateTdExpr('').ok).toBe(false);
+  });
+});
+
+describe('ext() external control', () => {
+  it('reads values set by a host, falls back when unset', () => {
+    expect(compileExpr("ext('missing', 0.7)")(zeroScope())).toBe(0.7);
+    expect(compileExpr("ext('missing')")(zeroScope())).toBe(0);
+    setExternal('hue', 205);
+    setExternals({ energy: 0.5, turb: 0.1 });
+    expect(compileExpr("ext('hue')")(zeroScope())).toBe(205);
+    expect(compileExpr("ext('energy', 9) + ext('turb')")(zeroScope())).toBeCloseTo(0.6);
   });
 });

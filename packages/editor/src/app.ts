@@ -181,6 +181,11 @@ export class EditorApp {
     this.loop();
   }
 
+  /** Load a project from a URL and adopt it (public API for hosts/bridges). */
+  async loadUrl(url: string, name = 'project'): Promise<void> {
+    this.adoptGraph(await loadProjectUrl(url), name);
+  }
+
   dispose(): void {
     cancelAnimationFrame(this.rafId);
     this.engine.gpu?.dispose();

@@ -4,9 +4,9 @@
 
 [![ci](https://github.com/frank890417/WebToe/actions/workflows/ci.yml/badge.svg)](https://github.com/frank890417/WebToe/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![live demo](https://img.shields.io/badge/live-frank890417.github.io%2FWebToe-7c6cff)](https://frank890417.github.io/WebToe/)
+[![live demo](https://img.shields.io/badge/live-webtoe.openaudiovisual.com-7c6cff)](https://webtoe.openaudiovisual.com/)
 
-**▶ Try it now: [frank890417.github.io/WebToe](https://frank890417.github.io/WebToe/)** — no install, runs entirely in your browser.
+**▶ Try it now: [webtoe.openaudiovisual.com](https://webtoe.openaudiovisual.com/)** — no install, runs entirely in your browser.
 
 ![WebToe editor running the lfo-garden example](docs/media/hero-lfo-garden.png)
 
@@ -40,12 +40,12 @@ npx webtoe        # serves the app locally and opens it — then just drag your 
 
 A `.toe` is a proprietary compressed container that no browser can decode (see [RESEARCH §1](docs/RESEARCH.md)). The one step that genuinely needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — therefore runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
 
-**No Node?** Every TouchDesigner install ships Python, so the same bridge is one stdlib-only file. Download [`bridge.py`](https://frank890417.github.io/WebToe/bridge.py) (the guide modal links it), then `python3 bridge.py` (TD's bundled interpreter works too) and drop your `.toe` on the hosted page. Protocol-identical to `npx webtoe`.
+**No Node?** Every TouchDesigner install ships Python, so the same bridge is one stdlib-only file. Download [`bridge.py`](https://webtoe.openaudiovisual.com/bridge.py) (the guide modal links it), then `python3 bridge.py` (TD's bundled interpreter works too) and drop your `.toe` on the hosted page. Protocol-identical to `npx webtoe`.
 
 Already using the hosted app with Node? Run the bridge alone in a terminal and the hosted page will find it. With no bridge at all, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
 
 ```bash
-# bridge only, for the hosted app at frank890417.github.io/WebToe
+# bridge only, for the hosted app at webtoe.openaudiovisual.com
 npx webtoe --no-open
 
 # share one bridge over LAN/Tailscale (e.g. TD on a Windows box, browsing elsewhere)
@@ -90,7 +90,7 @@ Ten bundled projects load from the toolbar and run out of the box. The flagship 
 
 ```bash
 npm install
-npm run dev        # editor at http://localhost:8643/WebToe/
+npm run dev        # editor at http://localhost:8643/
 npm run check      # typecheck + 60-test suite
 npm run build      # production build (apps/web/dist)
 node tools/capture-screens.mjs   # regenerate README screenshots (needs dev server + Chrome)

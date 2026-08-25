@@ -32,7 +32,17 @@ export interface ExprScope {
 /** op('x') result: index by channel name or number → sample value. */
 export type ChannelIndexable = Record<string | number, number>;
 
+// External control values — set by hosts that drive a patch from outside
+// (postMessage bridges, show controllers like open-audiovisual, tests).
+// Read in expressions as ext('name') or ext('name', fallback).
+const EXT_STORE = new Map<string, number>();
+export function setExternal(name: string, value: number): void { EXT_STORE.set(name, value); }
+export function setExternals(values: Record<string, number>): void {
+  for (const k of Object.keys(values)) EXT_STORE.set(k, values[k]);
+}
+
 const MATH_SCOPE: Record<string, unknown> = {
+  ext: (name: string, fallback = 0) => (EXT_STORE.has(name) ? EXT_STORE.get(name)! : fallback),
   PI: Math.PI,
   abs: Math.abs, sin: Math.sin, cos: Math.cos, tan: Math.tan,
   asin: Math.asin, acos: Math.acos, atan: Math.atan, atan2: Math.atan2,

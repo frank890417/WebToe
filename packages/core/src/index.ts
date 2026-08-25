@@ -10,6 +10,7 @@ export {
 } from './registry';
 export {
   compileExpr, makeChannelIndexable, translateTdExpr, zeroScope, zeroNodeRef, ExprError,
+  setExternal, setExternals,
   type CompiledExpr, type ExprScope, type ChannelIndexable, type TdTranslation,
   type NodeRef, type ParIndexable,
 } from './expr';
