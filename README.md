@@ -116,6 +116,16 @@ Deep dives: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · execution contract &
 
 To define "complete", we analyzed **60 real TouchDesigner projects (28,698 nodes, 2022–2026)** from a daily-practice generative art portfolio and crawled the **official operator inventory (~675 operators across 7 families)**. Two documents drive the evolution: **[docs/ROADMAP.md](docs/ROADMAP.md)** (phased plan with measured results — corpus coverage: 32.3% → 47.1% → **62.3%** across two measured evolution cycles, the second being the full 3D pipeline) and **[docs/TD-PARITY.md](docs/TD-PARITY.md)** (the full parity charter: per-family op tiers, portable vs web-equivalent vs native-only classification, and the engine-concept gaps — time slicing, audio, 3D, GLSL, POPs, panels — with the standing measure→pick→implement→verify loop).
 
+## Sister project: open-audiovisual
+
+[**open-audiovisual**](https://github.com/frank890417/open-audiovisual) is a
+web-native framework for audiovisual *performance* — MIDI/chord/pose inputs, a
+signal-to-parameter mapping layer, a timeline with scenes and cues, and a
+backstage monitor. The two are halves of one stack: **WebToe is the engine,
+open-audiovisual is the show.** A WebToe network can be performed as an openav
+World, and openav's named signals map naturally onto CHOP channels. Site:
+[openaudiovisual.com](https://openaudiovisual.com).
+
 ## NDI In/Out
 
 Browsers can't join NDI networks directly, so WebToe pairs two pieces: a tiny local bridge (`packages/ndi-bridge`, WebSocket on localhost) that owns the NDI side with **your own NDI runtime**, and `ndi in`/`ndi out` TOPs that do the pixel work in the browser — UYVY⇄RGBA conversion runs in a **1 KB WASM kernel** (AssemblyScript source in `packages/wasm-kernels`, JS fallback always available). Try it with zero NDI dependencies: `node packages/ndi-bridge/index.mjs --mock` streams an animated test pattern; for real NDI install the NDI runtime plus `grandiose` in the bridge package. NDI® is a trademark of Vizrt NDI AB — this repo ships no NDI SDK bits.
