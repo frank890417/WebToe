@@ -76,7 +76,7 @@ export default {
     research: '原生 .toe 解碼僅供研究用途。',
     fallbackTitle: '備援：橋接程式',
     fallbackText: '本機橋接程式在 127.0.0.1 上執行你自己安裝的 TouchDesigner 所附的 <code>toeexpand</code>，再把展開結果交給頁面。一行指令；或用 TouchDesigner 內附的 Python 執行 <a href="{root}bridge.py"><code>bridge.py</code></a>。',
-    fallbackNote: '只綁定本機迴路位址，不附帶任何 Derivative 的東西，處理完就刪除上傳的檔案。',
+    fallbackNote: '預設只綁定 127.0.0.1，不附帶任何 Derivative 的東西，處理完就刪除上傳的檔案。',
     measuredTitle: '在真實演出檔上實測',
     measuredNote: '一個 20 MB 的正式演出專案，透過橋接程式拖進頁面（WORKLOG，2026-08-01）。',
     measured: [
@@ -159,7 +159,7 @@ export default {
     eyebrow: '05 · 引擎 ↔ 演出',
     title: 'WebToe 是引擎，open-audiovisual 是演出。',
     p1: '<a href="https://openaudiovisual.com/">open-audiovisual</a> 是姊妹專案：一套網頁原生的影音演出框架，有 MIDI、和弦與姿態輸入、訊號到參數的對應層、含場景與 cue 的時間軸，以及後台監看。',
-    p2: '它的 <code>@openav/world-webtoe</code> 轉接器把這個編輯器嵌進 iframe，每一格把演出解算後的參數送進 patch。在網路裡它們就是普通數字：任何表達式寫 <code>ext(\'energy\')</code> 就能讀。',
+    p2: '它的 <code>@openav/world-webtoe</code> 轉接器把這個編輯器嵌進 iframe，每一格讀取演出解算後的參數，把有變動的送進 patch。在網路裡它們就是普通數字：任何表達式寫 <code>ext(\'energy\')</code> 就能讀。',
     docsLink: '嵌入與外部控制',
   },
 

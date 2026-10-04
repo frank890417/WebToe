@@ -97,6 +97,8 @@ h1 { font-weight: 800; }
   letter-spacing: -.01em; margin-top: clamp(14px, 1.4vw, 22px); color: var(--fg); max-width: 22ch; }
 html[lang^="zh"] .h1-sub { letter-spacing: .02em; font-weight: 600; max-width: 18em; }
 .h1-sub, .sec-head h2, .doc h1, .nf h1 { text-wrap: balance; }
+/* Chinese headings break at punctuation and spaces, not inside words */
+html[lang^="zh"] .h1-sub, html[lang^="zh"] .sec-head h2, html[lang^="zh"] .doc h1, html[lang^="zh"] .prose h2 { word-break: keep-all; overflow-wrap: anywhere; }
 .lede, .sec-lede, .doc-lede { text-wrap: pretty; }
 .lede { font-size: clamp(16.5px, 1.3vw, 19px); color: var(--fg-2); max-width: 56ch; margin: clamp(18px, 1.8vw, 26px) 0 0; }
 .lede code { font-size: .9em; }

@@ -79,7 +79,7 @@ export default {
     research: 'Native .toe decoding is provided for research purposes only.',
     fallbackTitle: 'The bridge, as fallback',
     fallbackText: 'The local bridge runs the <code>toeexpand</code> of your own TouchDesigner install on 127.0.0.1 and hands the expansion to the page. One command, or <a href="{root}bridge.py"><code>bridge.py</code></a> run with the Python that ships inside TouchDesigner.',
-    fallbackNote: 'Binds to loopback only, ships nothing of Derivative’s, deletes every upload when it is done.',
+    fallbackNote: 'Binds to 127.0.0.1 by default, ships nothing of Derivative’s, and deletes every upload when it is done.',
     measuredTitle: 'Measured on a real show file',
     measuredNote: 'A 20 MB production project, dropped on the page through the bridge (WORKLOG, 2026-08-01).',
     measured: [
@@ -162,7 +162,7 @@ export default {
     eyebrow: '05 · Engine ↔ show',
     title: 'WebToe is the engine. open-audiovisual is the show.',
     p1: '<a href="https://openaudiovisual.com/">open-audiovisual</a> is the sister project: a web-native framework for audiovisual performance, with MIDI, chord and pose inputs, a signal-to-parameter mapping layer, a timeline with scenes and cues, and a backstage monitor.',
-    p2: 'Its <code>@openav/world-webtoe</code> adapter embeds this editor in an iframe and streams the show’s resolved parameters into the patch every frame. Inside the network they are plain numbers: <code>ext(\'energy\')</code> in any expression.',
+    p2: 'Its <code>@openav/world-webtoe</code> adapter embeds this editor in an iframe, reads the show’s resolved parameters every frame and posts the ones that changed into the patch. Inside the network they are plain numbers: <code>ext(\'energy\')</code> in any expression.',
     docsLink: 'Embedding and external control',
   },
 
