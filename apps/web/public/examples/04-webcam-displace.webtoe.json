@@ -5,9 +5,9 @@
     "nodes": [
       { "name": "cam1", "type": "top:camerain", "family": "TOP", "pos": [40, 40] },
       { "name": "noisemap1", "type": "top:noise", "family": "TOP", "pos": [40, 200],
-        "params": { "period": { "mode": "const", "value": 0.6 },
+        "params": { "period": { "mode": "const", "value": 1.35 },
                     "speed": { "mode": "const", "value": 0.35 },
-                    "harmonics": { "mode": "const", "value": 2 },
+                    "harmonics": { "mode": "const", "value": 1 },
                     "mono": { "mode": "const", "value": false } } },
       { "name": "displace1", "type": "top:displace", "family": "TOP", "pos": [260, 40],
         "params": { "weight": { "mode": "expr", "value": 0.08, "expr": "0.04 + op('wob1')['chan1'] * 0.04" } } },

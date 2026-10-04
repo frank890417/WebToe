@@ -4,7 +4,8 @@ import type {
 import * as glsl from './glsl';
 import * as wgsl from './wgsl';
 import {
-  RAMP_KC, RAMP_KP, RAMP_MAX_KEYS, parseRampDat, rampKeys,
+  BLUR_TYPES, COMP_OPS, NOISE_TYPES, RAMP_KC, RAMP_KP, RAMP_MAX_KEYS,
+  compOverlay, hash32, noiseCoord, noiseSeedOffset, noiseXform, parseRampDat, rampKeys,
 } from './tdmath';
 
 const F = 'TOP' as const;
@@ -98,14 +99,31 @@ export const topOps: OpSpec[] = [
     label: 'noise',
     inputs: { min: 0, max: 0 },
     alwaysCook: true,
+    // TouchDesigner-faithful Noise TOP (docs/TD-PARITY.md "Fidelity"). Defaults
+    // are TD's; `harmonics` is TD's `harmon` (extra octaves: octaves = harmonics + 1).
+    // `speed` is a WebToe extra (tz += time·speed); TD imports set it to 0.
     params: [
-      { key: 'period', type: 'float', default: 0.35, min: 0.01, max: 4 },
-      { key: 'harmonics', type: 'int', default: 3, min: 1, max: 8 },
-      { key: 'offsetx', type: 'float', default: 0, min: -4, max: 4 },
-      { key: 'offsety', type: 'float', default: 0, min: -4, max: 4 },
-      { key: 'speed', type: 'float', default: 0.25, min: -4, max: 4 },
+      { key: 'type', type: 'menu', default: 'simplex3d', menu: [...NOISE_TYPES] },
+      { key: 'seed', type: 'float', default: 1, min: 0, max: 100 },
+      { key: 'period', type: 'float', default: 1, min: 0, max: 8 },
+      { key: 'harmonics', label: 'harmonics (extra octaves)', type: 'int', default: 2, min: 0, max: 15 },
+      { key: 'spread', type: 'float', default: 2, min: 0, max: 4 },
+      { key: 'gain', type: 'float', default: 0.7, min: 0, max: 1 },
+      { key: 'rough', label: 'roughness (sparse only)', type: 'float', default: 0.5, min: 0, max: 1 },
       { key: 'exponent', type: 'float', default: 1, min: 0.1, max: 8 },
+      { key: 'amp', label: 'amplitude', type: 'float', default: 0.5, min: 0, max: 4 },
+      { key: 'offset', type: 'float', default: 0.5, min: -2, max: 2 },
       { key: 'mono', type: 'toggle', default: true },
+      { key: 'aspectcorrect', label: 'aspect correct', type: 'toggle', default: true },
+      { key: 'alpha', type: 'menu', default: 'one', menu: ['one', 'zero', 'random'] },
+      { key: 'speed', label: 'speed (tz per second)', type: 'float', default: 0.25, min: -4, max: 4 },
+      ...['tx', 'ty', 'tz'].map((key): ParamSpec => ({ key, type: 'float', default: 0, min: -4, max: 4, page: 'transform' })),
+      ...['rx', 'ry', 'rz'].map((key): ParamSpec => ({ key, type: 'float', default: 0, min: -180, max: 180, page: 'transform' })),
+      ...['sx', 'sy', 'sz'].map((key): ParamSpec => ({ key, type: 'float', default: 1, min: -4, max: 4, page: 'transform' })),
+      ...['px', 'py', 'pz'].map((key): ParamSpec => ({ key, type: 'float', default: 0, min: -4, max: 4, page: 'transform' })),
+      { key: 'xord', label: 'transform order', type: 'menu', default: 'srt', menu: ['srt', 'str', 'rst', 'rts', 'tsr', 'trs'], page: 'transform' },
+      { key: 't4d', label: '4D translate', type: 'float', default: 0, min: -4, max: 4, page: 'transform' },
+      { key: 's4d', label: '4D scale', type: 'float', default: 1, min: -4, max: 4, page: 'transform' },
       ...resParams('custom'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -114,15 +132,36 @@ export const topOps: OpSpec[] = [
       if (!requireGpu(ctx)) return null;
       ensureShader(ctx, this);
       const { w, h } = resolution(ctx, null);
+      const n = (k: string) => ctx.paramNum(k);
+      const typeStr = ctx.paramStr('type');
+      const type = typeStr === 'randomgpu' ? NOISE_TYPES.indexOf('random') : NOISE_TYPES.indexOf(typeStr as never);
+      const period = Math.max(1e-6, n('period'));
+      const ps = noiseCoord(w, h, ctx.paramBool('aspectcorrect'));
+      const M = noiseXform({
+        tx: n('tx'), ty: n('ty'), tz: n('tz') + ctx.time.seconds * n('speed'),
+        rx: n('rx'), ry: n('ry'), rz: n('rz'), sx: n('sx'), sy: n('sy'), sz: n('sz'),
+        px: n('px'), py: n('py'), pz: n('pz'), xord: ctx.paramStr('xord'),
+      }, period);
+      const seed = n('seed'), w4 = n('t4d') * n('s4d');
+      const seeds = [0, 1, 2, 3].map((c) => { const o = noiseSeedOffset(seed, c); return [o[0], o[1], o[2], w4 + o[3]]; });
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
         uniforms: {
-          u_period: ctx.paramNum('period'),
-          u_harmonics: ctx.paramNum('harmonics'),
-          u_offset: [ctx.paramNum('offsetx'), ctx.paramNum('offsety')],
-          u_speed: ctx.paramNum('speed'),
-          u_exponent: ctx.paramNum('exponent'),
+          u_type: type < 0 ? NOISE_TYPES.indexOf('simplex3d') : type,
+          u_m0: M.slice(0, 4), u_m1: M.slice(4, 8), u_m2: M.slice(8, 12),
+          u_seed0: seeds[0], u_seed1: seeds[1], u_seed2: seeds[2], u_seed3: seeds[3],
+          u_ps: ps,
+          u_amp: n('amp'),
+          u_offset: n('offset'),
+          u_gain: n('gain'),
+          u_lac: n('spread'),
+          u_exp: n('exponent'),
+          u_oct: Math.max(1, Math.min(16, Math.round(n('harmonics')) + 1)),
+          u_rough: n('rough'),
           u_mono: ctx.paramBool('mono') ? 1 : 0,
+          u_alpha: { zero: 0, one: 1, random: 2 }[ctx.paramStr('alpha')] ?? 1,
+          u_tiny: period < 1e-5 ? 1 : 0,
+          u_seedr: (hash32(`td-random:${seed}`) % 100003) / 7,
         },
         inputs: [],
         output: { width: w, height: h },
@@ -428,8 +467,18 @@ export const topOps: OpSpec[] = [
     family: F,
     label: 'blur',
     inputs: { min: 1, max: 1 },
+    // TouchDesigner-faithful generated kernel (docs/TD-PARITY.md "Fidelity"):
+    // `size` is the full kernel width in taps (TD), not a radius. TD's three
+    // extend modes all render as hold, which is what clamp-to-edge gives.
     params: [
-      { key: 'size', type: 'float', default: 5, min: 0, max: 15 },
+      { key: 'type', type: 'menu', default: 'catmull', menu: [...BLUR_TYPES] },
+      { key: 'size', label: 'size (taps)', type: 'float', default: 7, min: 0, max: 128 },
+      { key: 'preshrink', type: 'int', default: 1, min: 1, max: 16 },
+      { key: 'offsetx', label: 'sample step x (px)', type: 'float', default: 1, min: 0, max: 8 },
+      { key: 'offsety', label: 'sample step y (px)', type: 'float', default: 1, min: 0, max: 8 },
+      { key: 'filterscalex', label: 'filter scale x', type: 'float', default: 1, min: 0, max: 4 },
+      { key: 'filterscaley', label: 'filter scale y', type: 'float', default: 1, min: 0, max: 4 },
+      // WebToe extras (not in TD): repeat the separable pass, restrict to one axis
       { key: 'passes', type: 'int', default: 1, min: 1, max: 4 },
       { key: 'direction', type: 'menu', default: 'both', menu: ['both', 'horizontal', 'vertical'] },
       ...resParams('input'),
@@ -439,32 +488,42 @@ export const topOps: OpSpec[] = [
     cook(ctx) {
       if (!requireGpu(ctx)) return null;
       ensureShader(ctx, this);
+      ctx.gpu!.registerShader('top:resample', { glsl: glsl.resampleGlsl, wgsl: wgsl.resampleWgsl });
       const input = asTop(ctx.inputs[0]);
       if (!input) return placeholder(ctx, [0.2, 0.2, 0.4, 1]);
       const { w, h } = resolution(ctx, input.tex);
       const size = ctx.paramNum('size');
-      const passes = Math.max(1, Math.round(ctx.paramNum('passes')));
+      const type = Math.max(0, ctx.menuIndex('type'));
       const dir = ctx.paramStr('direction');
-      let cur = input.tex;
-      const run = (d: [number, number], slot: string) => {
-        cur = ctx.gpu!.runPass(ctx.node, {
-          shaderId: this.type,
-          uniforms: { u_dir: d, u_size: size },
-          inputs: [cur],
-          output: { width: w, height: h },
-        }, slot);
-      };
+      const Sx = dir === 'vertical' ? 0 : Math.min(4096, Math.max(0, Math.round(size * ctx.paramNum('filterscalex'))));
+      const Sy = dir === 'horizontal' ? 0 : Math.min(4096, Math.max(0, Math.round(size * ctx.paramNum('filterscaley'))));
+      const stepX = ctx.paramNum('offsetx'), stepY = ctx.paramNum('offsety');
+      const passes = Math.max(1, Math.round(ctx.paramNum('passes')));
+      const ps = Math.max(1, Math.round(ctx.paramNum('preshrink')) || 1);
+
+      // ① preshrink: ONE bilinear tap per small-image pixel (not repeated halving)
+      const sw = ps > 1 ? Math.max(1, Math.round(input.tex.width / ps)) : input.tex.width;
+      const shh = ps > 1 ? Math.max(1, Math.round(input.tex.height / ps)) : input.tex.height;
+      type Step = { shader: string; uniforms: Record<string, number | number[]>; w: number; h: number };
+      const plan: Step[] = [];
+      if (ps > 1) plan.push({ shader: 'top:resample', uniforms: {}, w: sw, h: shh });
+      // ② horizontal then vertical on the (small) image
       for (let p = 0; p < passes; p++) {
-        const last = p === passes - 1;
-        if (dir === 'both') {
-          run([1, 0], `h${p}`);
-          run([0, 1], last ? 'main' : `v${p}`);
-        } else if (dir === 'horizontal') {
-          run([1, 0], last ? 'main' : `h${p}`);
-        } else {
-          run([0, 1], last ? 'main' : `v${p}`);
-        }
+        if (Sx > 1 && stepX !== 0) plan.push({ shader: this.type, uniforms: { u_dir: [1, 0], u_taps: Sx, u_step: stepX, u_type: type }, w: sw, h: shh });
+        if (Sy > 1 && stepY !== 0) plan.push({ shader: this.type, uniforms: { u_dir: [0, 1], u_taps: Sy, u_step: stepY, u_type: type }, w: sw, h: shh });
       }
+      // ③ bilinear back to the output size (skipped when the last pass already is)
+      const last = plan[plan.length - 1];
+      if (!last || last.w !== w || last.h !== h) plan.push({ shader: 'top:resample', uniforms: {}, w, h });
+      let cur = input.tex;
+      plan.forEach((s, i) => {
+        cur = ctx.gpu!.runPass(ctx.node, {
+          shaderId: s.shader,
+          uniforms: s.uniforms,
+          inputs: [cur],
+          output: { width: s.w, height: s.h },
+        }, i === plan.length - 1 ? 'main' : `p${i}`);
+      });
       return { kind: 'top', tex: cur };
     },
   },
@@ -475,11 +534,18 @@ export const topOps: OpSpec[] = [
     label: 'composite',
     inputs: { min: 1, max: 4 },
     inputLabels: ['top layer (input 0 composites over the rest)', 'layer 2', 'layer 3', 'base layer'],
+    // TouchDesigner-faithful (docs/TD-PARITY.md "Fidelity"): all 46 TD operations,
+    // premultiplied, left fold with input 0 on top. WebToe keeps 'over' as its
+    // default; TD's default 'multiply' is filled in by the importer.
     params: [
-      {
-        key: 'operation', type: 'menu', default: 'over',
-        menu: ['over', 'add', 'multiply', 'screen', 'subtract', 'difference'],
-      },
+      { key: 'operation', type: 'menu', default: 'over', menu: [...COMP_OPS] },
+      { key: 'swaporder', label: 'swap order', type: 'toggle', default: false },
+      { key: 'tx', label: 'translate x (input 0)', type: 'float', default: 0, min: -1, max: 1, page: 'transform' },
+      { key: 'ty', label: 'translate y', type: 'float', default: 0, min: -1, max: 1, page: 'transform' },
+      { key: 'rotate', type: 'float', default: 0, min: -360, max: 360, page: 'transform' },
+      { key: 'sx', type: 'float', default: 1, min: -4, max: 4, page: 'transform' },
+      { key: 'sy', type: 'float', default: 1, min: -4, max: 4, page: 'transform' },
+      { key: 'extend', label: 'overlay extend', type: 'menu', default: 'zero', menu: ['zero', 'hold', 'repeat', 'mirror'], page: 'transform' },
       ...resParams('input'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -490,9 +556,20 @@ export const topOps: OpSpec[] = [
       const texes = ctx.inputs.map(asTop).filter((t): t is TextureOut => !!t).map((t) => t.tex);
       if (!texes.length) return placeholder(ctx, [0.4, 0.2, 0.2, 1]);
       const { w, h } = resolution(ctx, texes[0]);
+      const xf = { tx: ctx.paramNum('tx'), ty: ctx.paramNum('ty'), rotate: ctx.paramNum('rotate'), sx: ctx.paramNum('sx'), sy: ctx.paramNum('sy') };
+      const identity = xf.tx === 0 && xf.ty === 0 && xf.rotate === 0 && xf.sx === 1 && xf.sy === 1;
+      const ov = compOverlay(w, h, xf);
+      const op = ctx.menuIndex('operation');
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
-        uniforms: { u_op: ctx.menuIndex('operation'), u_count: texes.length },
+        uniforms: {
+          u_op: op < 0 ? COMP_OPS.indexOf('over') : op,
+          u_count: Math.min(4, texes.length),
+          u_swap: ctx.paramBool('swaporder') ? 1 : 0,
+          u_ext: Math.max(0, ctx.menuIndex('extend')),
+          u_xf: ov.xf,
+          u_ovc: [ov.center[0], ov.center[1], ov.asp, identity ? 1 : 0],
+        },
         inputs: texes.slice(0, 4),
         output: { width: w, height: h },
       });

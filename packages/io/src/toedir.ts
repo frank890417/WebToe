@@ -49,6 +49,11 @@ const TYPE_MAP: Record<string, string> = {
   'TOP:over': 'top:composite',
   'TOP:add': 'top:composite',
   'TOP:multiply': 'top:composite',
+  'TOP:subtract': 'top:composite',
+  'TOP:screen': 'top:composite',
+  'TOP:inside': 'top:composite',
+  'TOP:outside': 'top:composite',
+  'TOP:difference': 'top:composite',
   'TOP:displace': 'top:displace',
   'TOP:edge': 'top:edge',
   'TOP:monochrome': 'top:monochrome',
@@ -162,6 +167,16 @@ const TYPE_PRESETS: Record<string, Record<string, ParamVal>> = {
   'TOP:over': { operation: 'over' },
   'TOP:add': { operation: 'add' },
   'TOP:multiply': { operation: 'multiply' },
+  'TOP:subtract': { operation: 'subtract' },
+  'TOP:screen': { operation: 'screen' },
+  'TOP:inside': { operation: 'inside' },
+  'TOP:outside': { operation: 'outside' },
+  'TOP:difference': { operation: 'difference' },
+  // TD's Composite defaults to multiply (WebToe's own default is over)
+  'TOP:composite': { operation: 'multiply' },
+  'TOP:comp': { operation: 'multiply' },
+  // TD noise is static unless its translate is driven; WebToe's speed is an extra
+  'TOP:noise': { speed: 0 },
 };
 
 type ParamRule =
@@ -180,6 +195,27 @@ const rgbaRules = (td: string, to: string, base?: number[]): Record<string, Para
   ['r', 'g', 'b', 'a'].map((c, i) => [`${td}${c}`, base ? { toColor: to, channel: i, base } : { toColor: to, channel: i }]),
 );
 
+/** TD Composite operand tokens (all 46 are implemented, see packages/ops/src/top/complib.ts) */
+const TD_COMP_OPERANDS = [
+  'add', 'atop', 'average', 'brightest', 'burncolor', 'burnlinear', 'chromadifference', 'color', 'darkercolor', 'difference',
+  'dimmest', 'divide', 'dodge', 'exclude', 'freeze', 'glow', 'hardlight', 'hardmix', 'heat', 'hue',
+  'inside', 'insideluminance', 'inverse', 'lightercolor', 'luminancedifference', 'maximum', 'minimum', 'multiply',
+  'negate', 'outside', 'outsideluminance', 'over', 'overlay', 'pinlight', 'reflect', 'screen', 'softlight',
+  'linearlight', 'stencilluminance', 'subtract', 'subtractive', 'under', 'vividlight', 'xor', 'yfilm', 'zfilm',
+];
+
+/** Composite-family transform page (applies to input 0, prefit fill) */
+const COMP_XFORM_RULES: Record<string, ParamRule> = {
+  swaporder: { to: 'swaporder' },
+  tx: { to: 'tx' },
+  ty: { to: 'ty' },
+  r: { to: 'rotate' },
+  rotate: { to: 'rotate' },
+  sx: { to: 'sx' },
+  sy: { to: 'sy' },
+  extend: { to: 'extend', menu: ident('zero', 'hold', 'repeat', 'mirror') },
+};
+
 /** shared object-COMP transform page (TD tokens are 1:1 with ours) */
 const XFORM_RULES: Record<string, ParamRule> = Object.fromEntries(
   ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'px', 'py', 'pz'].map((k) => [k, { to: k }]),
@@ -189,10 +225,30 @@ const XFORM_RULES: Record<string, ParamRule> = Object.fromEntries(
  *  ignored (counted in the report). */
 const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
   'TOP:noise': {
+    type: {
+      to: 'type',
+      menu: {
+        ...ident('perlin2d', 'perlin3d', 'perlin4d', 'simplex2d', 'simplex3d', 'simplex4d', 'random', 'sparse', 'hermite', 'harmonic', 'alligator'),
+        randomgpu: 'random',
+      },
+    },
+    seed: { to: 'seed' },
     period: { to: 'period' },
+    // WebToe's `harmonics` IS TD's harmon (extra octaves; octaves = harmon + 1)
     harmon: { to: 'harmonics' },
+    spread: { to: 'spread' },
+    gain: { to: 'gain' },
+    rough: { to: 'rough' },
     exp: { to: 'exponent' },
+    amp: { to: 'amp' },
+    offset: { to: 'offset' },
     mono: { to: 'mono' },
+    aspectcorrect: { to: 'aspectcorrect' },
+    alpha: { to: 'alpha', menu: ident('one', 'zero', 'random') },
+    ...XFORM_RULES,
+    xord: { to: 'xord', menu: ident('srt', 'str', 'rst', 'rts', 'tsr', 'trs') },
+    t4d: { to: 't4d' },
+    s4d: { to: 's4d' },
   },
   'TOP:level': {
     brightness1: { to: 'brightness' },
@@ -219,7 +275,17 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     alpha: { to: 'alpha', menu: ident(...TD_CHANNEL_TOKENS) },
     clamp: { to: 'clamp' },
   },
-  'TOP:blur': { size: { to: 'size' } },
+  'TOP:blur': {
+    size: { to: 'size' },          // TD size = full kernel width (taps)
+    type: { to: 'type', menu: ident('catmull', 'gaussian', 'box', 'bartlette', 'sinc', 'hanning', 'blackman') },
+    preshrink: { to: 'preshrink' },
+    offsetx: { to: 'offsetx' },
+    offsety: { to: 'offsety' },
+    offset1: { to: 'offsetx' },
+    offset2: { to: 'offsety' },
+    filterscalex: { to: 'filterscalex' },
+    filterscaley: { to: 'filterscaley' },
+  },
   'TOP:transform': {
     tx: { to: 'tx' },
     ty: { to: 'ty' },
@@ -258,8 +324,16 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     colorb: { toColor: 'color', channel: 2 },
     alpha: { toColor: 'color', channel: 3 },
   },
-  'TOP:composite': { operand: { to: 'operation' } },
-  'TOP:comp': { operand: { to: 'operation' } },
+  'TOP:composite': { operand: { to: 'operation', menu: ident(...TD_COMP_OPERANDS) }, ...COMP_XFORM_RULES },
+  'TOP:comp': { operand: { to: 'operation', menu: ident(...TD_COMP_OPERANDS) }, ...COMP_XFORM_RULES },
+  'TOP:over': COMP_XFORM_RULES,
+  'TOP:add': COMP_XFORM_RULES,
+  'TOP:multiply': COMP_XFORM_RULES,
+  'TOP:subtract': COMP_XFORM_RULES,
+  'TOP:screen': COMP_XFORM_RULES,
+  'TOP:inside': COMP_XFORM_RULES,
+  'TOP:outside': COMP_XFORM_RULES,
+  'TOP:difference': COMP_XFORM_RULES,
   'TOP:displace': {
     weight1: { to: 'weight' },
     offsetweight1: { to: 'weight' },

@@ -96,10 +96,6 @@
      330
     ],
     "params": {
-     "opacity": {
-      "mode": "const",
-      "value": 0.97
-     },
      "brightness": {
       "mode": "const",
       "value": 0.99
@@ -132,7 +128,7 @@
     "params": {
      "size": {
       "mode": "const",
-      "value": 1.5
+      "value": 3
      }
     }
    },

@@ -11,7 +11,7 @@
         "params": { "frequency": { "mode": "const", "value": 0.05 }, "amplitude": { "mode": "const", "value": 180 }, "phase": { "mode": "const", "value": 0.66 } } },
 
       { "name": "ramp1", "type": "top:ramp", "family": "TOP", "pos": [40, 40],
-        "params": { "type": { "mode": "const", "value": "circular" },
+        "params": { "type": { "mode": "const", "value": "radial" },
                     "colora": { "mode": "const", "value": [0.9, 0.3, 0.45, 1] },
                     "colorb": { "mode": "const", "value": [0.05, 0.05, 0.1, 1] } } },
       { "name": "trans1", "type": "top:transform", "family": "TOP", "pos": [230, 40],
@@ -20,7 +20,7 @@
                     "extend": { "mode": "const", "value": "mirror" } } },
 
       { "name": "ramp2", "type": "top:ramp", "family": "TOP", "pos": [40, 130],
-        "params": { "type": { "mode": "const", "value": "circular" },
+        "params": { "type": { "mode": "const", "value": "radial" },
                     "colora": { "mode": "const", "value": [0.25, 0.65, 0.9, 1] },
                     "colorb": { "mode": "const", "value": [0, 0.05, 0.12, 1] } } },
       { "name": "trans2", "type": "top:transform", "family": "TOP", "pos": [230, 130],
@@ -29,7 +29,7 @@
                     "extend": { "mode": "const", "value": "mirror" } } },
 
       { "name": "ramp3", "type": "top:ramp", "family": "TOP", "pos": [40, 220],
-        "params": { "type": { "mode": "const", "value": "radial" }, "phase": { "mode": "expr", "value": 0, "expr": "time.seconds * 0.08" },
+        "params": { "type": { "mode": "const", "value": "circular" }, "phase": { "mode": "expr", "value": 0, "expr": "time.seconds * 0.08" },
                     "colora": { "mode": "const", "value": [0.95, 0.8, 0.35, 1] },
                     "colorb": { "mode": "const", "value": [0.06, 0.02, 0, 1] } } },
       { "name": "trans3", "type": "top:transform", "family": "TOP", "pos": [230, 220],

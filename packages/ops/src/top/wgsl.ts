@@ -8,6 +8,8 @@
  * dependent branches stay valid under WGSL's uniformity rules.
  */
 import { RAMP_KC, RAMP_KP, RAMP_MAX_KEYS } from './tdmath';
+import { NOISE_LIB_WGSL } from './noiselib';
+import { COMP_LIB_WGSL } from './complib';
 
 /** `struct Ops` with the given uniform names in the backend's sorted order. */
 export function opsStruct(names: readonly string[]): string {
@@ -143,64 +145,66 @@ fn tdChannel(c: vec4f, s: i32) -> f32 {
   return dot(c.rgb, vec3f(0.2126, 0.7152, 0.0722));
 }`;
 
-const NOISE_LIB_WGSL = `
-fn hash3(p0: vec3f) -> f32 {
-  var p = fract(p0 * vec3f(443.897, 441.423, 437.195));
-  p = p + dot(p, p.yzx + 19.19);
-  return fract((p.x + p.y) * p.z);
-}
-fn vnoise(p: vec3f) -> f32 {
-  let i = floor(p);
-  let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  let n000 = hash3(i);
-  let n100 = hash3(i + vec3f(1.0, 0.0, 0.0));
-  let n010 = hash3(i + vec3f(0.0, 1.0, 0.0));
-  let n110 = hash3(i + vec3f(1.0, 1.0, 0.0));
-  let n001 = hash3(i + vec3f(0.0, 0.0, 1.0));
-  let n101 = hash3(i + vec3f(1.0, 0.0, 1.0));
-  let n011 = hash3(i + vec3f(0.0, 1.0, 1.0));
-  let n111 = hash3(i + vec3f(1.0, 1.0, 1.0));
-  return mix(
-    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
-    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),
-    u.z);
-}
-fn fbm(p0: vec3f, harmonics: f32) -> f32 {
-  var p = p0;
-  var sum = 0.0;
-  var amp = 0.5;
-  var norm = 0.0;
-  for (var o = 0; o < 8; o++) {
-    if (f32(o) >= harmonics) { break; }
-    sum = sum + vnoise(p) * amp;
-    norm = norm + amp;
-    amp = amp * 0.5;
-    p = p * 2.03;
-  }
-  return select(0.0, sum / norm, norm > 0.0);
-}`;
-
+/** Noise TOP — see glsl.ts noiseGlsl for the measured TD rules. */
 export const noiseWgsl = `${NOISE_LIB_WGSL}
-struct Ops { u_exponent: vec4f, u_harmonics: vec4f, u_mono: vec4f, u_offset: vec4f, u_period: vec4f, u_speed: vec4f }
-@group(0) @binding(0) var<uniform> G: Globals;
+${opsStruct(['u_type', 'u_m0', 'u_m1', 'u_m2', 'u_seed0', 'u_seed1', 'u_seed2', 'u_seed3', 'u_ps', 'u_amp', 'u_offset', 'u_gain', 'u_lac', 'u_exp', 'u_oct', 'u_rough', 'u_mono', 'u_alpha', 'u_tiny', 'u_seedr'])}
 @group(0) @binding(1) var<uniform> P: Ops;
-fn channel(p: vec3f, harmonics: f32, exponent: f32) -> f32 {
-  return pow(clamp(fbm(p, harmonics), 0.0, 1.0), max(exponent, 1e-4));
+fn basis(ty: i32, t: vec4f) -> f32 {
+  if (ty == 0) { return tdPerlin2(t.xy); }
+  if (ty == 1) { return tdPerlin3(t.xyz); }
+  if (ty == 2) { return tdPerlin4(t); }
+  if (ty == 3) { return tdSimplex2(t.xy); }
+  if (ty == 5) { return tdSimplex4(t); }
+  if (ty == 7 || ty == 9) { return tdQmap(tdPerlin3(t.xyz / 1.4), 0, 2); }
+  if (ty == 8) { return tdQmap(tdPerlin3(t.xyz / 1.2), 0, 3); }
+  if (ty == 10) { return tdQmap(tdCellBump(t.xyz / 1.7), 1, 4); }
+  return tdSimplex3(t.xyz);
+}
+fn chan(c: i32, seed: vec4f, uv: vec2f, frag: vec2f) -> f32 {
+  let ty = i32(P.u_type.x + 0.5);
+  if (ty == 6) { return 2.0 * h31(vec3f(floor(frag), f32(c) * 131.0 + P.u_seedr.x)) - 1.0; }
+  let Pp = vec4f(4.0 * uv * P.u_ps.xy - 2.0, 0.0, 1.0);
+  var t = vec4f(dot(P.u_m0, Pp), dot(P.u_m1, Pp), dot(P.u_m2, Pp), 0.0) + seed;
+  if (P.u_tiny.x > 0.5) {
+    let q = floor(frag);
+    t = vec4f(256.0 * vec3f(h31(vec3f(q, f32(c) * 7.0 + 1.0)), h31(vec3f(q, f32(c) * 7.0 + 2.0)), h31(vec3f(q, f32(c) * 7.0 + 3.0))), t.w);
+  }
+  var g = P.u_gain.x;
+  if (ty == 7) { g = P.u_rough.x; } else if (ty == 9) { g = 1.0; }
+  var n = 0.0;
+  var amp = 1.0;
+  var wsum = 0.0;
+  let oct = i32(P.u_oct.x + 0.5);
+  for (var j = 0; j < 16; j++) {
+    if (j >= oct) { break; }
+    n = n + basis(ty, t) * amp;
+    wsum = wsum + amp;
+    t = t * P.u_lac.x;
+    amp = amp * g;
+  }
+  if (ty == 8 || ty == 10) { return n / wsum; }
+  return n;
 }
 @fragment fn fs(in: VOut) -> @location(0) vec4f {
-  let uv = (in.uv + P.u_offset.xy) * max(G.res.x / G.res.y, 1.0);
-  let p = vec3f(uv / max(P.u_period.x, 1e-4), G.time.x * P.u_speed.x);
-  let h = P.u_harmonics.x;
-  let e = P.u_exponent.x;
-  let n = channel(p, h, e);
-  var rgb = vec3f(n);
-  if (P.u_mono.x < 0.5) {
-    rgb = vec3f(n,
-      channel(p + vec3f(13.7, 7.3, 5.1), h, e),
-      channel(p + vec3f(29.1, 17.9, 11.3), h, e));
+  let frag = in.pos.xy;
+  var n: vec4f;
+  if (P.u_mono.x > 0.5) {
+    n = vec4f(chan(0, P.u_seed0, in.uv, frag));
+  } else {
+    var a = 0.0;
+    if (P.u_alpha.x > 1.5) { a = chan(3, P.u_seed3, in.uv, frag); }
+    n = vec4f(chan(0, P.u_seed0, in.uv, frag), chan(1, P.u_seed1, in.uv, frag), chan(2, P.u_seed2, in.uv, frag), a);
   }
-  return vec4f(rgb, 1.0);
+  if (i32(P.u_type.x + 0.5) == 6) {
+    n = n * P.u_amp.x + P.u_offset.x;
+  } else {
+    n = n * P.u_amp.x;
+    if (P.u_exp.x != 1.0) { n = sign(n) * pow(abs(n), vec4f(P.u_exp.x)); }
+    n = n + P.u_offset.x;
+  }
+  var alpha = n.a;
+  if (P.u_alpha.x < 0.5) { alpha = 0.0; } else if (P.u_alpha.x < 1.5) { alpha = 1.0; }
+  return vec4f(n.rgb, alpha);
 }`;
 
 export const rectangleWgsl = `
@@ -293,55 +297,107 @@ fn hsv2rgb(c: vec3f) -> vec3f {
   return vec4f(hsv2rgb(hsv), c.a);
 }`;
 
+/** Blur TOP kernel — see glsl.ts blurGlsl (same weights, computed in-shader). */
 export const blurWgsl = `
-struct Ops { u_dir: vec4f, u_size: vec4f }
-@group(0) @binding(0) var<uniform> G: Globals;
+${opsStruct(['u_dir', 'u_taps', 'u_step', 'u_type'])}
 @group(0) @binding(1) var<uniform> P: Ops;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var tex0: texture_2d<f32>;
-@fragment fn fs(in: VOut) -> @location(0) vec4f {
-  let radius = max(P.u_size.x, 0.0);
-  if (radius < 0.01) { return textureSample(tex0, samp, in.uv); }
-  let sigma = max(radius / 2.0, 0.5);
-  let texel = P.u_dir.xy / G.res.xy;
-  var sum = vec4f(0.0);
-  var norm = 0.0;
-  for (var i = -15; i <= 15; i++) {
-    let x = f32(i);
-    let w = select(0.0, exp(-(x * x) / (2.0 * sigma * sigma)), abs(x) <= radius);
-    sum = sum + textureSample(tex0, samp, in.uv + texel * x) * w;
-    norm = norm + w;
+fn blurErf(x0: f32) -> f32 {
+  let s = sign(x0);
+  let x = abs(x0);
+  let t = 1.0 / (1.0 + 0.3275911 * x);
+  return s * (1.0 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x));
+}
+fn blurSi(x: f32) -> f32 {
+  var sum = 0.0;
+  var term = x;
+  for (var n = 0; n < 30; n++) {
+    sum = sum + term / f32(2 * n + 1);
+    term = term * (-x * x / f32((2 * n + 2) * (2 * n + 3)));
   }
-  return sum / max(norm, 1e-6);
+  return sum;
+}
+fn blurFk(v: f32, ty: i32) -> f32 {
+  if (ty == 1) { return 0.59081795 * blurErf(1.5 * v); }
+  if (ty == 2) { return v; }
+  if (ty == 3) { return v - 0.5 * v * v; }
+  if (ty == 4) { return blurSi(6.28318531 * v) / 6.28318531; }
+  if (ty == 5) { return 0.5 * v + sin(3.14159265 * v) / 6.28318531; }
+  if (ty == 6) { return 0.42 * v + sin(3.14159265 * v) / 6.28318531 + 0.08 / 6.28318531 * sin(6.28318531 * v); }
+  return v - 0.83333333 * v * v * v + 0.375 * v * v * v * v;
+}
+fn blurF(u: f32, ty: i32) -> f32 {
+  let d = 1.0 / 1024.0;
+  let a = min(abs(u), 1.0);
+  return sign(u) * (min(a, d) + (1.0 - d) * blurFk(max(a - d, 0.0) / (1.0 - d), ty));
+}
+@fragment fn fs(in: VOut) -> @location(0) vec4f {
+  let S = i32(P.u_taps.x + 0.5);
+  let ty = i32(P.u_type.x + 0.5);
+  let texel = P.u_dir.xy / vec2f(textureDimensions(tex0));
+  let R = 0.5 * f32(S);
+  let c = 0.5 * f32(S - 1);
+  let norm = 0.5 / blurF(1.0, ty);
+  var fl = -blurF(1.0, ty);
+  var sum = vec4f(0.0);
+  for (var i = 0; i < 4096; i++) {
+    if (i >= S) { break; }
+    let x = f32(i) - c;
+    let fr = blurF((x + 0.5) / R, ty);
+    sum = sum + (fr - fl) * norm * textureSampleLevel(tex0, samp, in.uv + texel * (x * P.u_step.x), 0.0);
+    fl = fr;
+  }
+  return sum;
 }`;
 
+/** One bilinear tap per output pixel (Blur preshrink / upsample). */
+export const resampleWgsl = `
+@group(0) @binding(2) var samp: sampler;
+@group(0) @binding(3) var tex0: texture_2d<f32>;
+@fragment fn fs(in: VOut) -> @location(0) vec4f {
+  return textureSampleLevel(tex0, samp, in.uv, 0.0);
+}`;
+
+/** Composite TOP — see glsl.ts compositeGlsl (TD's 46 operations, left fold, transform page). */
 export const compositeWgsl = `
-struct Ops { u_count: vec4f, u_op: vec4f }
+${opsStruct(['u_op', 'u_count', 'u_swap', 'u_ext', 'u_xf', 'u_ovc'])}
 @group(0) @binding(1) var<uniform> P: Ops;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var tex0: texture_2d<f32>;
 @group(0) @binding(4) var tex1: texture_2d<f32>;
 @group(0) @binding(5) var tex2: texture_2d<f32>;
 @group(0) @binding(6) var tex3: texture_2d<f32>;
-fn blend(base: vec4f, layer: vec4f) -> vec4f {
-  let op = P.u_op.x;
-  if (op < 0.5)      { return vec4f(mix(base.rgb, layer.rgb, layer.a), max(base.a, layer.a)); }
-  else if (op < 1.5) { return vec4f(base.rgb + layer.rgb, max(base.a, layer.a)); }
-  else if (op < 2.5) { return vec4f(base.rgb * layer.rgb, base.a); }
-  else if (op < 3.5) { return vec4f(1.0 - (1.0 - base.rgb) * (1.0 - layer.rgb), max(base.a, layer.a)); }
-  else if (op < 4.5) { return vec4f(base.rgb - layer.rgb, base.a); }
-  return vec4f(abs(base.rgb - layer.rgb), max(base.a, layer.a));
+${COMP_LIB_WGSL}
+fn overlaySample(uv: vec2f) -> vec4f {
+  if (P.u_ovc.w > 0.5) { return textureSampleLevel(tex0, samp, uv, 0.0); }
+  var d = (uv - P.u_ovc.xy) * vec2f(P.u_ovc.z, 1.0);
+  d = vec2f(P.u_xf.x * d.x + P.u_xf.y * d.y, -P.u_xf.y * d.x + P.u_xf.x * d.y);
+  var ov = vec2f(d.x / P.u_ovc.z * P.u_xf.z, d.y * P.u_xf.w) + 0.5;
+  let ext = i32(P.u_ext.x + 0.5);
+  if (ext == 0) {
+    let sz = vec2f(textureDimensions(tex0));
+    let lo = clamp(ov * sz + 0.5, vec2f(0.0), vec2f(1.0));
+    let hi = clamp((1.0 - ov) * sz + 0.5, vec2f(0.0), vec2f(1.0));
+    let cover = lo.x * lo.y * hi.x * hi.y;
+    if (cover <= 0.0) { return vec4f(0.0); }
+    return textureSampleLevel(tex0, samp, clamp(ov, vec2f(0.0), vec2f(1.0)), 0.0) * cover;
+  }
+  if (ext == 2) { ov = fract(ov); }
+  else if (ext == 3) { ov = 1.0 - abs(ov - 2.0 * floor(ov * 0.5) - 1.0); }
+  return textureSampleLevel(tex0, samp, clamp(ov, vec2f(0.0), vec2f(1.0)), 0.0);
+}
+fn step2(acc: vec4f, next: vec4f, op: i32) -> vec4f {
+  if (P.u_swap.x > 0.5) { return tdComp(next, acc, op); }
+  return tdComp(acc, next, op);
 }
 @fragment fn fs(in: VOut) -> @location(0) vec4f {
-  let t0 = textureSample(tex0, samp, in.uv);
-  let t1 = textureSample(tex1, samp, in.uv);
-  let t2 = textureSample(tex2, samp, in.uv);
-  let t3 = textureSample(tex3, samp, in.uv);
-  var c: vec4f;
-  if (P.u_count.x > 3.5)      { c = t3; c = blend(c, t2); c = blend(c, t1); c = blend(c, t0); }
-  else if (P.u_count.x > 2.5) { c = t2; c = blend(c, t1); c = blend(c, t0); }
-  else if (P.u_count.x > 1.5) { c = t1; c = blend(c, t0); }
-  else                        { c = t0; }
+  let n = i32(P.u_count.x + 0.5);
+  let op = i32(P.u_op.x + 0.5);
+  var c = overlaySample(in.uv);
+  if (n > 1) { c = step2(c, textureSampleLevel(tex1, samp, in.uv, 0.0), op); }
+  if (n > 2) { c = step2(c, textureSampleLevel(tex2, samp, in.uv, 0.0), op); }
+  if (n > 3) { c = step2(c, textureSampleLevel(tex3, samp, in.uv, 0.0), op); }
   return c;
 }`;
 

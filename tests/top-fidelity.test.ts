@@ -12,8 +12,14 @@ import { Engine, type GpuFacade, type NodeInst, type TexturePassSpec, type Textu
 import { registerAllOps, topOps } from '@webtoe/ops';
 import * as glsl from '../packages/ops/src/top/glsl';
 import * as wgsl from '../packages/ops/src/top/wgsl';
-import { rampKeys, LUM709 } from '../packages/ops/src/top/tdmath';
-import { edgeRef, levelRef, rampCoord, rampRef } from './top-fidelity-ref';
+import {
+  BLUR_DELTA, BLUR_TYPES, COMP_OPS, GRAD3, GRAD4, LUM709, NOISE_TYPES, PERM, SIMPLEX4, TD_NOISE_SEED,
+  blurF, blurKernel, blurKernelPixels, compOverlayUV, gradByte, noiseCoord, noiseSeedOffset, noiseXform, rampKeys,
+} from '../packages/ops/src/top/tdmath';
+import {
+  blurRef, compRef, edgeRef, levelRef, noiseGpuRef, perlin2Ref, perlin3Ref, perlin4Ref, permTextureData,
+  rampCoord, rampRef, resample, simplex2Ref, simplexNRef,
+} from './top-fidelity-ref';
 
 beforeAll(() => registerAllOps());
 
@@ -174,17 +180,312 @@ describe('Ramp TOP (key wrap, phase/period, extend)', () => {
   });
 });
 
+// ---------------------------------------------------------------- 5. Blur
+
+/** JS mirror of the shaders' in-loop weights (A&S erf, telescoping normalisation). */
+function shaderBlurWeights(S: number, type: number): number[] {
+  const erfAS = (x0: number) => {
+    const s = Math.sign(x0), x = Math.abs(x0), t = 1 / (1 + 0.3275911 * x);
+    return s * (1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x));
+  };
+  const si = (x: number) => { let sum = 0, term = x; for (let n = 0; n < 30; n++) { sum += term / (2 * n + 1); term *= (-x * x) / ((2 * n + 2) * (2 * n + 3)); } return sum; };
+  const Fk = (v: number) => [
+    v - 0.83333333 * v ** 3 + 0.375 * v ** 4,
+    0.59081795 * erfAS(1.5 * v),
+    v,
+    v - 0.5 * v * v,
+    si(6.28318531 * v) / 6.28318531,
+    0.5 * v + Math.sin(3.14159265 * v) / 6.28318531,
+    0.42 * v + Math.sin(3.14159265 * v) / 6.28318531 + (0.08 / 6.28318531) * Math.sin(6.28318531 * v),
+  ][type];
+  const F = (u: number) => { const d = 1 / 1024, a = Math.min(Math.abs(u), 1); return Math.sign(u) * (Math.min(a, d) + (1 - d) * Fk(Math.max(a - d, 0) / (1 - d))); };
+  const R = S / 2, c = (S - 1) / 2, norm = 0.5 / F(1);
+  let fl = -F(1);
+  const w: number[] = [];
+  for (let i = 0; i < S; i++) { const fr = F((i - c + 0.5) / R); w.push((fr - fl) * norm); fl = fr; }
+  return w;
+}
+
+describe('Blur TOP (generated kernel, size = full width, preshrink)', () => {
+  it('TD size is the full kernel width: S taps at i − (S−1)/2', () => {
+    const k7 = blurKernel(7), k8 = blurKernel(8);
+    expect([...k7.x]).toEqual([-3, -2, -1, 0, 1, 2, 3]);
+    expect([...k8.x]).toEqual([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]);   // even S: half texels
+    expect(blurKernelPixels(8).weights.length).toBe(9);
+  });
+  it('weights are normalised, symmetric, and catmull has no negative lobe', () => {
+    for (const type of BLUR_TYPES) for (const S of [2, 3, 7, 16, 33, 80]) {
+      const { w } = blurKernel(S, type);
+      close(w.reduce((a, b) => a + b, 0), 1, 1e-12);
+      for (let i = 0; i < S; i++) close(w[i], w[S - 1 - i], 1e-12);
+      if (type === 'catmull' || type === 'gaussian' || type === 'box') expect(Math.min(...w)).toBeGreaterThanOrEqual(0);
+    }
+    expect(new Set(Array.from(blurKernel(5, 'box').w, (v) => v.toFixed(12))).size).toBe(1);
+  });
+  it('kernel shapes: catmull 1−2.5v²+1.5v³, gaussian exp(−(1.5v)²) (σ = S/(3√2) ≈ 0.2357·S), flat top inside the 1/1024 inset', () => {
+    const d = BLUR_DELTA, dK = (u: number, t: (typeof BLUR_TYPES)[number]) => (blurF(u + 1e-7, t) - blurF(u - 1e-7, t)) / 2e-7;
+    for (const u of [0.2, 0.5, 0.8]) {
+      const v = (u - d) / (1 - d);
+      close(dK(u, 'catmull'), 1 - 2.5 * v * v + 1.5 * v ** 3, 1e-6);
+      close(dK(u, 'gaussian'), Math.exp(-((1.5 * v) ** 2)), 1e-6);
+    }
+    close(dK(d / 2, 'catmull'), 1, 1e-6);
+    close(1 / (3 * Math.SQRT2), 0.2357, 1e-4);
+  });
+  it('shader weights (computed in-loop, no normalising pass) match the reference kernel', () => {
+    for (let type = 0; type < BLUR_TYPES.length; type++) for (const S of [2, 3, 5, 7, 8, 13, 32, 80]) {
+      const ref = blurKernel(S, BLUR_TYPES[type]).w, got = shaderBlurWeights(S, type);
+      for (let i = 0; i < S; i++) close(got[i], ref[i], 2e-6);
+    }
+  });
+  it('preshrink is one bilinear tap: p 2 = 2×2 mean, p 4 reads only the middle 2×2 of each 4×4', () => {
+    const W = 16, img = Array.from({ length: W * W }, (_, i) => ((i * 7919) % 101) / 100);
+    const at = (x: number, y: number) => img[y * W + x];
+    const s2 = resample(img, W, W, 8, 8);
+    close(s2[3 * 8 + 5], (at(10, 6) + at(11, 6) + at(10, 7) + at(11, 7)) / 4, 1e-12);
+    const s4 = resample(img, W, W, 4, 4);
+    close(s4[1 * 4 + 2], (at(9, 5) + at(10, 5) + at(9, 6) + at(10, 6)) / 4, 1e-12);
+  });
+  it('an impulse keeps its energy through preshrink + both passes + upsample', () => {
+    const W = 64, img = new Float64Array(W * W); img[32 * W + 32] = 1;
+    for (const p of [{ size: 7 }, { size: 16, type: 'gaussian' as const }, { size: 9, preshrink: 2 }, { size: 5, offsetx: 3, offsety: 3 }]) {
+      const out = blurRef(img, W, W, p);
+      close(out.reduce((a, b) => a + b, 0), 1, 1e-9);
+    }
+  });
+  it('cook plan: preshrink → horizontal → vertical → upsample, taps = round(size·filterscale)', () => {
+    const gpu = cookWithMock('top:blur', { size: 7, preshrink: 4, filterscaley: 2 });
+    const plan = gpu.passes.filter((p) => p.node === 'n1')
+      .map((p) => [p.spec.shaderId, p.spec.output.width, p.spec.output.height, p.spec.uniforms.u_taps ?? null, p.slot]);
+    expect(plan).toEqual([
+      ['top:resample', 16, 8, null, 'p0'],
+      ['top:blur', 16, 8, 7, 'p1'],
+      ['top:blur', 16, 8, 14, 'p2'],
+      ['top:resample', 64, 32, null, 'main'],
+    ]);
+    const plain = cookWithMock('top:blur', {});
+    expect(plain.passes.filter((p) => p.node === 'n1').map((p) => p.slot)).toEqual(['p0', 'main']);   // h then v writes main directly
+  });
+  it('shaders carry the generated kernel (not a Gaussian radius)', () => {
+    for (const src of [glsl.blurGlsl, wgsl.blurWgsl]) {
+      expect(src).toContain('u_taps');
+      expect(src).toContain('0.83333333');      // catmull integral
+      expect(src).toContain('0.3275911');       // A&S erf
+      expect(src).toContain('1.0 / 1024.0');    // kernel inset
+      expect(src).not.toContain('sigma');
+    }
+  });
+});
+
+// ---------------------------------------------------------------- 6. Noise
+
+/** JS mirror of the shaders' integer emulation of Gustavson's lookup textures (noiselib.ts). */
+const tdPT = (x: number, y: number) => PERM[(x + PERM[y & 255]) & 255];
+const tdIdx = (v: number) => (v === 255 ? 0 : v);
+const tdG3 = (v: number) => GRAD3[v & 15].map(gradByte);
+const tdG4 = (v: number) => GRAD4[v & 31].map(gradByte);
+const fadeJS = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+const mixJS = (a: number, b: number, t: number) => a + (b - a) * t;
+const dotJS = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0);
+const sub = (a: number[], b: number[]) => a.map((v, i) => v - b[i]);
+const intNoise = {
+  perlin2([x, y]: number[]) {
+    const I = [Math.floor(x), Math.floor(y)], f = [x - I[0], y - I[1]];
+    const n = (ox: number, oy: number) => dotJS(tdG3(tdPT(I[0] + ox, I[1] + oy)).slice(0, 2), sub(f, [ox, oy]));
+    return mixJS(mixJS(n(0, 0), n(1, 0), fadeJS(f[0])), mixJS(n(0, 1), n(1, 1), fadeJS(f[0])), fadeJS(f[1]));
+  },
+  perlin3(P: number[]) {
+    const I = P.map(Math.floor), f = P.map((v, i) => v - I[i]);
+    const n = (ox: number, oy: number, oz: number) => dotJS(tdG3(tdPT(tdIdx(tdPT(I[0] + ox, I[1] + oy)), I[2] + oz)), sub(f, [ox, oy, oz]));
+    const X = (oy: number, oz: number) => mixJS(n(0, oy, oz), n(1, oy, oz), fadeJS(f[0]));
+    return mixJS(mixJS(X(0, 0), X(1, 0), fadeJS(f[1])), mixJS(X(0, 1), X(1, 1), fadeJS(f[1])), fadeJS(f[2]));
+  },
+  perlin4(P: number[]) {
+    const I = P.map(Math.floor), f = P.map((v, i) => v - I[i]);
+    const n = (a: number, b: number, c: number, d: number) => dotJS(tdG4(tdPT(tdIdx(tdPT(I[0] + a, I[1] + b)), tdIdx(tdPT(I[2] + c, I[3] + d)))), sub(f, [a, b, c, d]));
+    const X = (b: number, c: number, d: number) => mixJS(n(0, b, c, d), n(1, b, c, d), fadeJS(f[0]));
+    const Y = (c: number, d: number) => mixJS(X(0, c, d), X(1, c, d), fadeJS(f[1]));
+    const Z = (d: number) => mixJS(Y(0, d), Y(1, d), fadeJS(f[2]));
+    return mixJS(Z(0), Z(1), fadeJS(f[3]));
+  },
+  simplex(P: number[]) {
+    const D = P.length, F = [0, 0, 0.366025403784, 0.333333333333, 0.309016994375][D], G = [0, 0, 0.211324865405, 0.166666666667, 0.138196601125][D];
+    const R2 = D === 2 ? 0.5 : 0.6, K = [0, 0, 70, 32, 27][D];
+    const s = P.reduce((a, b) => a + b, 0) * F, Pi = P.map((v) => Math.floor(v + s)), t = Pi.reduce((a, b) => a + b, 0) * G;
+    const f0 = P.map((v, i) => v - (Pi[i] - t));
+    const grad = (o: number[]) => (D === 2 ? tdG3(tdPT(Pi[0] + o[0], Pi[1] + o[1])).slice(0, 2)
+      : D === 3 ? tdG3(tdPT(tdIdx(tdPT(Pi[0] + o[0], Pi[1] + o[1])), Pi[2] + o[2]))
+        : tdG4(tdPT(tdIdx(tdPT(Pi[0] + o[0], Pi[1] + o[1])), tdIdx(tdPT(Pi[2] + o[2], Pi[3] + o[3])))));
+    const corner = (o: number[], k: number) => {
+      const f = f0.map((v, i) => v - o[i] + k * G);
+      let q = R2 - dotJS(f, f);
+      if (q < 0) return 0;
+      q *= q;
+      return q * q * dotJS(grad(o), f);
+    };
+    let offs: number[][];
+    if (D === 2) offs = [f0[0] > f0[1] ? [1, 0] : [0, 1]];
+    else {
+      let idx = (f0[0] > f0[1] ? 32 : 0) + (f0[0] > f0[2] ? 16 : 0) + (f0[1] > f0[2] ? 8 : 0);
+      if (D === 4) idx += (f0[0] > f0[3] ? 4 : 0) + (f0[1] > f0[3] ? 2 : 0) + (f0[2] > f0[3] ? 1 : 0);
+      const off = SIMPLEX4[idx].slice(0, D);
+      offs = (D === 3 ? [96, 32] : [160, 96, 32]).map((th) => off.map((v) => (v >= th ? 1 : 0)));
+    }
+    let sum = corner(new Array(D).fill(0), 0);
+    offs.forEach((o, m) => { sum += corner(o, m + 1); });
+    sum += corner(new Array(D).fill(1), D);
+    return K * sum;
+  },
+};
+
+describe('Noise TOP (Gustavson tables, TD coordinates, seeds, octaves)', () => {
+  it('the integer table emulation addresses exactly the texels the texture version reads', () => {
+    const perm = permTextureData();
+    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+      expect(tdPT(x, y)).toBe(perm[(y * 256 + x) * 4 + 3]);
+      const v = perm[(y * 256 + x) * 4 + 3];
+      expect(tdG3(v).map((g) => Math.round((g + 1) / 4 * 255))).toEqual([0, 1, 2].map((k) => perm[(y * 256 + x) * 4 + k]));
+    }
+    // a permutation value reused as a texture coordinate v/255 hits texel v — except 255 (= 1.0) wraps to 0
+    for (let v = 0; v < 256; v++) expect(Math.floor((v / 255) * 256) % 256).toBe(tdIdx(v));
+    // the 8-bit gradient encoding TD reads: −1, 1/255, 257/255 instead of −1, 0, 1
+    expect([-1, 0, 1].map(gradByte)).toEqual([-1, 1 / 255, 257 / 255].map((x) => expect.closeTo(x, 12)));
+  });
+  it('integer formulation (what the shaders run) equals the texture formulation for all six GPU types', () => {
+    const rnd = (i: number) => ((i * 2654435761) % 4294967296) / 4294967296;
+    for (let i = 0; i < 300; i++) {
+      const P = [0, 1, 2, 3].map((k) => (rnd(i * 4 + k + 1) - 0.5) * 1200);
+      close(intNoise.perlin2(P.slice(0, 2)), perlin2Ref(P[0], P[1]), 1e-9);
+      close(intNoise.perlin3(P.slice(0, 3)), perlin3Ref(P[0], P[1], P[2]), 1e-9);
+      close(intNoise.perlin4(P), perlin4Ref(P[0], P[1], P[2], P[3]), 1e-9);
+      close(intNoise.simplex(P.slice(0, 2)), simplex2Ref(P[0], P[1]), 1e-9);
+      close(intNoise.simplex(P.slice(0, 3)), simplexNRef(P.slice(0, 3)), 1e-9);
+      close(intNoise.simplex(P), simplexNRef(P), 1e-9);
+    }
+  });
+  it('classic Perlin is 0 on lattice points', () => {
+    for (const [x, y, z] of [[0, 0, 0], [3, -7, 12], [255, 256, -1]]) {
+      close(perlin2Ref(x, y), 0, 1e-12);
+      close(perlin3Ref(x, y, z), 0, 1e-12);
+    }
+  });
+  it('coordinates: P = 4·pixel/max(w,h) − 2, anchored bottom-left (512×256 spans y −2..0)', () => {
+    expect(noiseCoord(512, 256)).toEqual([1, 0.5]);
+    expect(noiseCoord(512, 256, false)).toEqual([1, 1]);
+    const ps = noiseCoord(512, 256), Py = (v: number) => 4 * v * ps[1] - 2;
+    close(Py(0), -2); close(Py(1), 0);
+  });
+  it('transform page: translate subtracts and is not divided by period; scale/rotate are forward', () => {
+    const M = noiseXform({ tx: 0.3 }, 0.5);
+    close(M[0] * 1 + M[3], 1 / 0.5 - 0.3);      // P.x = 1 → 2 − 0.3
+    const S = noiseXform({ sx: 1.5 }, 1);
+    close(S[0], 1.5);                            // denser pattern
+    const R = noiseXform({ rz: 90 }, 1);           // pivot at P = −0.5: (1, 0) → −0.5 + Rz·(1.5, 0.5) = (−1, 1)
+    close(R[0] * 1 + R[3], -1);
+    close(R[4] * 1 + R[7], 1);
+  });
+  it('seeds: measured offsets; channel 1 = 2·channel 0 − (½, ½, 0) for every measured seed', () => {
+    expect(noiseSeedOffset(1, 0)).toEqual([428.5, -184.5, 201, 0]);
+    expect(noiseSeedOffset(1, 1)).toEqual([856.5, -369.5, 402, 0]);
+    for (const [seed, row] of Object.entries(TD_NOISE_SEED)) {
+      const c0 = row[0]!, c1 = noiseSeedOffset(Number(seed), 1);
+      close(c1[0], 2 * c0[0] - 0.5); close(c1[1], 2 * c0[1] - 0.5);
+      if (c0[2] != null) close(c1[2], 2 * c0[2]);
+    }
+    // unmeasured seeds are deterministic hashes
+    expect(noiseSeedOffset(42, 0)).toEqual(noiseSeedOffset(42, 0));
+    expect(noiseSeedOffset(42, 0)).not.toEqual(noiseSeedOffset(43, 0));
+  });
+  it('octaves = harmon + 1, chain sign·|amp·n|^exp + offset', () => {
+    const M = noiseXform({}, 1), seed = noiseSeedOffset(1, 0);
+    const one = noiseGpuRef('perlin2d', 0.3, 0.6, M, [1, 1], seed, 0, { harmon: 0, amp: 1, offset: 0 });
+    const P = [4 * 0.3 - 2 + seed[0], 4 * 0.6 - 2 + seed[1]];
+    close(one, perlin2Ref(P[0], P[1]), 1e-12);
+    const two = noiseGpuRef('perlin2d', 0.3, 0.6, M, [1, 1], seed, 0, { harmon: 1, amp: 1, offset: 0, gain: 0.5 });
+    close(two, perlin2Ref(P[0], P[1]) + 0.5 * perlin2Ref(2 * P[0], 2 * P[1]), 1e-12);
+    const ex = noiseGpuRef('perlin2d', 0.3, 0.6, M, [1, 1], seed, 0, { harmon: 0, amp: 0.8, offset: 0.2, exp: 2 });
+    close(ex, Math.sign(one) * (0.8 * Math.abs(one)) ** 2 + 0.2, 1e-12);
+  });
+  it('cook: TD defaults, octaves = harmonics + 1, seed offsets per channel, time-driven tz only via speed', () => {
+    const spec = topOps.find((o) => o.type === 'top:noise')!;
+    const d = Object.fromEntries(spec.params.map((p) => [p.key, p.default]));
+    expect(d).toMatchObject({ type: 'simplex3d', seed: 1, period: 1, harmonics: 2, spread: 2, gain: 0.7, exponent: 1, amp: 0.5, offset: 0.5, mono: true, aspectcorrect: true, alpha: 'one' });
+    const gpu = cookWithMock('top:noise', { harmonics: 4, speed: 0, mono: false });
+    const u = gpu.passes.find((p) => p.node === 'n1')!.spec.uniforms;
+    expect(u.u_oct).toBe(5);
+    expect(u.u_seed0).toEqual([428.5, -184.5, 201, 0]);
+    expect(u.u_seed1).toEqual([856.5, -369.5, 402, 0]);
+    expect(u.u_type).toBe(NOISE_TYPES.indexOf('simplex3d'));
+  });
+  it('shaders: Gustavson notice kept, TD coordinate rule, both backends', () => {
+    for (const [src, coord] of [[glsl.noiseGlsl, '4.0 * v_uv * u_ps - 2.0'], [wgsl.noiseWgsl, '4.0 * uv * P.u_ps.xy - 2.0']]) {
+      expect(src).toContain('provided that my name and this notice appears intact');
+      expect(src).toContain('David Hoskins');
+      expect(src).toContain(coord);
+      expect(src).toContain(PERM.slice(0, 8).join(', '));
+    }
+  });
+});
+
+// ---------------------------------------------------------------- 7. Composite
+
+describe('Composite TOP (46 TD operations, premultiplied, left fold, transform page)', () => {
+  it('menu carries all 46 TD operations, each implemented in GLSL and WGSL', () => {
+    expect(COMP_OPS.length).toBe(46);
+    expect(new Set(COMP_OPS).size).toBe(46);
+    const spec = topOps.find((o) => o.type === 'top:composite')!;
+    expect(spec.params.find((p) => p.key === 'operation')?.menu).toEqual([...COMP_OPS]);
+    for (const src of [glsl.compositeGlsl, wgsl.compositeWgsl]) {
+      for (let i = 0; i < COMP_OPS.length; i++) expect(src, COMP_OPS[i]).toMatch(new RegExp(`op == ${i}\\b`));
+    }
+  });
+  it('over is premultiplied: A + B·(1 − A.a)', () => {
+    const r = compRef('over', [0.3, 0.1, 0, 0.5], [0.2, 0.8, 0.4, 1]);
+    [0.4, 0.5, 0.2, 1].forEach((v, i) => close(r[i], v, 1e-12));
+  });
+  it('subtract is A − B with A = the first input (WebToe used to subtract the other way)', () => {
+    const r = compRef('subtract', [0.8, 0.5, 0.2, 1], [0.3, 0.1, 0.1, 1]);
+    close(r[0], 0.5, 1e-12);
+  });
+  it('blend modes lay the mode result over A with B\'s alpha', () => {
+    const A = [0.4, 0.3, 0.2, 1], B = [0.25, 0.25, 0.25, 0.5];        // B un-premultiplied = 0.5 grey
+    const r = compRef('multiply', A, B), s = compRef('softlight', A, B);
+    close(r[0], 0.1, 1e-12);
+    const X = 0.4, Y = 0.5, soft = (1 - 2 * Y) * X * X + 2 * X * Y;
+    close(s[0], X * (1 - 0.5) + soft * 0.5, 1e-12);
+  });
+  it('transform page is forward R·S·(p + t): the translate is scaled by sx before rotation', () => {
+    const W = 200, H = 100;
+    const [u] = compOverlayUV(0.7, 0.5, W, H, { tx: 0.1, sx: 2 });
+    close(u, 0.5, 1e-12);                                               // overlay centre lands at 0.5 + 0.1·2
+    const [u2, v2] = compOverlayUV(0.5, 0.5 + 0.1, W, H, { rotate: 90, ty: 0, tx: 0.1 / 2 });   // tx·asp rotated onto +y
+    close(u2, 0.5, 1e-9); close(v2, 0.5, 1e-9);
+  });
+  it('cook: identity transform samples input 0 directly; operation index = shader code', () => {
+    const gpu = cookWithMock('top:composite', { operation: 'subtractive' });
+    const u = gpu.passes.find((p) => p.node === 'n1')!.spec.uniforms;
+    expect(u.u_op).toBe(COMP_OPS.indexOf('subtractive'));
+    expect(u.u_count).toBe(4);
+    expect((u.u_ovc as number[])[3]).toBe(1);
+  });
+  it('shaders fold left with input 0 on top and honour swaporder', () => {
+    expect(glsl.compositeGlsl).toContain('u_swap > 0.5 ? tdComp(next, acc, op) : tdComp(acc, next, op)');
+    expect(wgsl.compositeWgsl).toContain('return tdComp(acc, next, op)');
+    for (const src of [glsl.compositeGlsl, wgsl.compositeWgsl]) expect(src).toContain('Sam Hocevar');
+  });
+});
+
 // ---------------------------------------------------------------- uniform parity (all TOP shaders)
 
 class MockGpu implements GpuFacade {
   readonly name = 'webgl2' as const;
   readonly shaders = new Map<string, ShaderSources>();
-  readonly passes: { slot: string; spec: TexturePassSpec }[] = [];
+  readonly passes: { node: string; slot: string; spec: TexturePassSpec }[] = [];
   private id = 1;
   setTime(): void {}
   registerShader(id: string, s: ShaderSources): void { if (!this.shaders.has(id)) this.shaders.set(id, s); }
-  runPass(_n: NodeInst, spec: TexturePassSpec, slot = 'main'): TextureHandle {
-    this.passes.push({ slot, spec });
+  runPass(n: NodeInst, spec: TexturePassSpec, slot = 'main'): TextureHandle {
+    this.passes.push({ node: n.name, slot, spec });
     return { id: this.id++, width: Math.round(spec.output.width), height: Math.round(spec.output.height) };
   }
   previousFrame(): TextureHandle | null { return null; }
@@ -218,7 +519,7 @@ function cookWithMock(type: string, params: Record<string, unknown> = {}): MockG
 }
 
 describe('uniform parity: what a pass uploads is what both shaders declare', () => {
-  const shaderOps = topOps.filter((o) => o.shaders && (o.backends ?? []).includes('webgpu'));
+  const shaderOps = topOps.filter((o) => o.shaders);
   for (const op of shaderOps) {
     it(op.type, () => {
       const gpu = cookWithMock(op.type);
@@ -229,8 +530,12 @@ describe('uniform parity: what a pass uploads is what both shaders declare', () 
         for (const k of keys) {
           const v = spec.uniforms[k];
           expect(typeof v === 'number' || (v.length >= 2 && v.length <= 4), `${spec.shaderId}.${k} must be a scalar or vec2..4`).toBe(true);
-          expect(src.glsl, `${spec.shaderId} GLSL declares ${k}`).toMatch(new RegExp(`uniform\\s+\\w+\\s+${k}\\b`));
+          // numbers upload with uniform1f, arrays with uniform{2,3,4}fv: the GLSL type must match exactly
+          const glslType = typeof v === 'number' ? 'float' : `vec${v.length}`;
+          expect(src.glsl, `${spec.shaderId} GLSL declares ${glslType} ${k}`).toMatch(new RegExp(`uniform\\s+${glslType}\\s+${k}\\b`));
         }
+        if (!(op.backends ?? []).includes('webgpu')) continue;
+        // the WebGPU backend packs uniforms by sorted key, one vec4 each — the struct must list exactly those, in that order
         const m = src.wgsl?.match(/struct Ops \{([^}]*)\}/);
         const fields = m ? [...m[1].matchAll(/(\w+)\s*:\s*vec4f/g)].map((x) => x[1]) : [];
         expect(fields, `${spec.shaderId} WGSL Ops struct`).toEqual(keys);

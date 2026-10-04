@@ -4,7 +4,7 @@
   "root": {
     "nodes": [
       { "name": "noise1", "type": "top:noise", "family": "TOP", "pos": [40, 40],
-        "params": { "period": { "mode": "const", "value": 0.45 }, "speed": { "mode": "const", "value": 0.3 } } },
+        "params": { "period": { "mode": "const", "value": 1 }, "speed": { "mode": "const", "value": 0.3 } } },
       { "name": "level1", "type": "top:level", "family": "TOP", "pos": [240, 40],
         "params": { "brightness": { "mode": "expr", "value": 1, "expr": "op('lfo1')['chan1']" } } },
       { "name": "out1", "type": "top:out", "family": "TOP", "pos": [440, 40], "flags": { "display": true } },

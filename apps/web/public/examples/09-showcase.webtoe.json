@@ -37,7 +37,7 @@
                  "strength": { "mode": "expr", "value": 16, "expr": "pow(2 + op('energy1')['tx'] * 6, 2)" } } },
 
    { "name": "ramp1", "type": "top:ramp", "family": "TOP", "pos": [40, 150],
-     "params": { "type": { "mode": "const", "value": "circular" },
+     "params": { "type": { "mode": "const", "value": "radial" },
                  "colora": { "mode": "const", "value": [0.95, 0.45, 0.2, 1] },
                  "colorb": { "mode": "const", "value": [0.1, 0.05, 0.3, 1] },
                  "phase": { "mode": "expr", "value": 0, "expr": "fract(time.seconds * 0.04)" } } },
@@ -66,9 +66,9 @@
 
    { "name": "noise_color", "type": "top:noise", "family": "TOP", "pos": [40, 260],
      "params": { "mono": { "mode": "const", "value": false },
-                 "period": { "mode": "const", "value": 0.6 },
+                 "period": { "mode": "const", "value": 1.35 },
                  "speed": { "mode": "const", "value": 0.3 },
-                 "harmonics": { "mode": "const", "value": 2 } } },
+                 "harmonics": { "mode": "const", "value": 1 } } },
    { "name": "hue_drift", "type": "top:hsvadjust", "family": "TOP", "pos": [240, 260],
      "params": { "hueoffset": { "mode": "expr", "value": 0, "expr": "fract(time.seconds * 0.03)" },
                  "satmult": { "mode": "const", "value": 1.3 } } },
@@ -78,7 +78,7 @@
 
    { "name": "noise_map", "type": "top:noise", "family": "TOP", "pos": [560, 260],
      "params": { "mono": { "mode": "const", "value": false },
-                 "period": { "mode": "const", "value": 0.9 },
+                 "period": { "mode": "const", "value": 2 },
                  "speed": { "mode": "const", "value": 0.18 } } },
    { "name": "map_mix", "type": "top:reorder", "family": "TOP", "pos": [730, 260],
      "params": { "outr": { "mode": "const", "value": "g" },
@@ -88,8 +88,7 @@
 
    { "name": "feed1", "type": "top:feedback", "family": "TOP", "pos": [740, 360] },
    { "name": "fade1", "type": "top:level", "family": "TOP", "pos": [910, 360],
-     "params": { "opacity": { "mode": "const", "value": 0.95 },
-                 "brightness": { "mode": "const", "value": 0.985 } } },
+     "params": { "brightness": { "mode": "const", "value": 0.985 } } },
    { "name": "trail_hue", "type": "top:hsvadjust", "family": "TOP", "pos": [1080, 360],
      "params": { "hueoffset": { "mode": "const", "value": 0.012 } } },
    { "name": "comp_main", "type": "top:composite", "family": "TOP", "pos": [930, 150],

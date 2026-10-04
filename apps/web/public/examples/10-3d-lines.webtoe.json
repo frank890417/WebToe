@@ -89,7 +89,7 @@
      "params": { "camera": { "mode": "const", "value": "cam1" },
                  "bgcolor": { "mode": "const", "value": [0.03, 0.03, 0.05, 1] } } },
    { "name": "glow", "type": "top:blur", "family": "TOP", "pos": [820, 140],
-     "params": { "size": { "mode": "const", "value": 8 }, "passes": { "mode": "const", "value": 2 } } },
+     "params": { "type": { "mode": "const", "value": "gaussian" }, "size": { "mode": "const", "value": 16 }, "passes": { "mode": "const", "value": 2 } } },
    { "name": "mix1", "type": "top:composite", "family": "TOP", "pos": [1000, 40],
      "params": { "operation": { "mode": "const", "value": "add" } } },
    { "name": "out1", "type": "top:out", "family": "TOP", "pos": [1180, 40], "flags": { "display": true } }

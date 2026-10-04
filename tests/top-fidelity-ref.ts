@@ -236,7 +236,8 @@ function lerpAt(get: (i: number) => number, n: number, c: number): number {
   const a = get(clamp(i0, 0, n - 1)), b = get(clamp(i0 + 1, 0, n - 1));
   return a + (b - a) * t;
 }
-function resample(img: ArrayLike<number>, W: number, H: number, w: number, h: number): Float64Array {
+/** Resample a single-channel image to w×h with one bilinear tap per target pixel centre. */
+export function resample(img: ArrayLike<number>, W: number, H: number, w: number, h: number): Float64Array {
   const tmp = new Float64Array(w * H), out = new Float64Array(w * h);
   for (let y = 0; y < H; y++) for (let x = 0; x < w; x++) tmp[y * w + x] = lerpAt((i) => img[y * W + i], W, ((x + 0.5) * W) / w - 0.5);
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) out[y * w + x] = lerpAt((j) => tmp[j * w + x], H, ((y + 0.5) * H) / h - 0.5);

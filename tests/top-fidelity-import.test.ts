@@ -64,6 +64,56 @@ describe('TD → WebToe parameter import (fidelity TOPs)', () => {
     expect(par(g, 'e1', 'compinput')).toBe(true);
   });
 
+  it('Blur: size stays the full TD width; type, preshrink, sample step, filter scale', async () => {
+    const g = await load({ b1: { type: 'TOP:blur', parm: 'size 0 32\ntype 0 gaussian\npreshrink 0 4\noffsetx 0 2\nfilterscaley 0 0.5' } });
+    expect(par(g, 'b1', 'size')).toBe(32);
+    expect(par(g, 'b1', 'type')).toBe('gaussian');
+    expect(par(g, 'b1', 'preshrink')).toBe(4);
+    expect(par(g, 'b1', 'offsetx')).toBe(2);
+    expect(par(g, 'b1', 'filterscaley')).toBe(0.5);
+  });
+
+  it('Noise: harmon is TD harmon (octaves = harmon + 1), TD noise is static, transform page and type map', async () => {
+    const g = await load({
+      n1: { type: 'TOP:noise', parm: 'type 0 perlin2d\nharmon 0 0\nperiod 0 1.06\noffset 0 -0.2\ntx 0 0.3\nrz 0 30\nseed 0 7\nspread 0 2.5' },
+      n2: { type: 'TOP:noise', parm: 'type 0 randomgpu' },
+      n3: { type: 'TOP:noise' },
+    });
+    expect(par(g, 'n1', 'type')).toBe('perlin2d');
+    expect(par(g, 'n1', 'harmonics')).toBe(0);
+    expect(par(g, 'n1', 'offset')).toBe(-0.2);
+    expect(par(g, 'n1', 'tx')).toBe(0.3);
+    expect(par(g, 'n1', 'rz')).toBe(30);
+    expect(par(g, 'n1', 'seed')).toBe(7);
+    expect(par(g, 'n1', 'spread')).toBe(2.5);
+    expect(par(g, 'n2', 'type')).toBe('random');
+    // a silent .parm means TD defaults: WebToe's defaults are TD's, except the speed extra which is off
+    expect(par(g, 'n3', 'speed')).toBe(0);
+    expect(par(g, 'n3', 'harmonics')).toBe(2);
+    expect(par(g, 'n3', 'period')).toBe(1);
+  });
+
+  it('Composite: TD default operand is multiply; all TD operands; single-purpose TOPs; transform page', async () => {
+    const g = await load({
+      c1: { type: 'TOP:composite' },
+      c2: { type: 'TOP:composite', parm: 'operand 0 overlay\nswaporder 0 1\ntx 0 0.25\nr 0 45\nsx 0 2' },
+      s1: { type: 'TOP:subtract' },
+      o1: { type: 'TOP:over', parm: 'extend 0 hold' },
+      x1: { type: 'TOP:composite', parm: 'operand 0 notarealop' },
+    });
+    expect(par(g, 'c1', 'operation')).toBe('multiply');
+    expect(par(g, 'c2', 'operation')).toBe('overlay');
+    expect(par(g, 'c2', 'swaporder')).toBe(1);
+    expect(par(g, 'c2', 'tx')).toBe(0.25);
+    expect(par(g, 'c2', 'rotate')).toBe(45);
+    expect(par(g, 'c2', 'sx')).toBe(2);
+    expect(g.resolve('/s1', g.root)?.type).toBe('top:composite');
+    expect(par(g, 's1', 'operation')).toBe('subtract');
+    expect(par(g, 'o1', 'operation')).toBe('over');
+    expect(par(g, 'o1', 'extend')).toBe('hold');
+    expect(par(g, 'x1', 'operation')).toBe('multiply');   // unknown token → TD default
+  });
+
   it('Monochrome is mapped (was a stub) with its rgb/alpha menus', async () => {
     const g = await load({ m1: { type: 'TOP:monochrome', parm: 'rgb 0 rgbmax\nalpha 0 one' } });
     expect(g.resolve('/m1', g.root)?.type).toBe('top:monochrome');

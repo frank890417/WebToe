@@ -14,6 +14,8 @@
  * uniform is at most a vec4, so the same set packs for WGSL too.
  */
 import { RAMP_KC, RAMP_KP, RAMP_MAX_KEYS } from './tdmath';
+import { NOISE_LIB_GLSL } from './noiselib';
+import { COMP_LIB_GLSL } from './complib';
 
 const PRE = `#version 300 es
 precision highp float;
@@ -28,60 +30,84 @@ uniform vec4 u_color;
 void main() { fragColor = u_color; }
 `;
 
-const NOISE_LIB = `
-float hash3(vec3 p) {
-  p = fract(p * vec3(443.897, 441.423, 437.195));
-  p += dot(p, p.yzx + 19.19);
-  return fract((p.x + p.y) * p.z);
-}
-float vnoise(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-  float n000 = hash3(i);
-  float n100 = hash3(i + vec3(1, 0, 0));
-  float n010 = hash3(i + vec3(0, 1, 0));
-  float n110 = hash3(i + vec3(1, 1, 0));
-  float n001 = hash3(i + vec3(0, 0, 1));
-  float n101 = hash3(i + vec3(1, 0, 1));
-  float n011 = hash3(i + vec3(0, 1, 1));
-  float n111 = hash3(i + vec3(1, 1, 1));
-  return mix(
-    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
-    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),
-    u.z);
-}
-float fbm(vec3 p, float harmonics) {
-  float sum = 0.0, amp = 0.5, norm = 0.0;
-  for (int o = 0; o < 8; o++) {
-    if (float(o) >= harmonics) break;
-    sum += vnoise(p) * amp;
-    norm += amp;
-    amp *= 0.5;
-    p *= 2.03;
-  }
-  return norm > 0.0 ? sum / norm : 0.0;
-}
-`;
-
+/**
+ * Noise TOP, TouchDesigner-faithful (measured: GPU types within 3.7e-3, 99.9%
+ * within 6e-4). P = 4·pixel/max(w,h) − 2 (bottom-left anchored, u_ps), then
+ * the CPU-built transform (P/period through the transform page, translate
+ * subtracted and NOT divided by period) plus a per-channel seed offset; the
+ * 4th dimension is t4d·s4d + seed w. Octaves = harmon + 1:
+ *   n = Σ basis(t·spread^j)·gain^j  →  sign·|amp·n|^exp + offset
+ * rough has no effect on the GPU types. period ≈ 0 is white noise (TD treats
+ * 0 as 1e-6; float32 cannot reproduce TD's values there, only statistics).
+ * Types: 0–2 perlin 2D–4D, 3–5 simplex 2D–4D, 6 random (per-pixel uniform,
+ * ignores period/transform/exp), 7–10 sparse/hermite/harmonic/alligator =
+ * statistical approximations of TD's CPU noises (not pixel-faithful).
+ */
 export const noiseGlsl = `${PRE}
-uniform float u_period;
-uniform float u_harmonics;
-uniform vec2 u_offset;
-uniform float u_speed;
+uniform float u_type;
+uniform vec4 u_m0;        // transform rows: noise-space = M·(P, 0, 1)
+uniform vec4 u_m1;
+uniform vec4 u_m2;
+uniform vec4 u_seed0;     // per-channel seed offset xyz, w = 4th dimension
+uniform vec4 u_seed1;
+uniform vec4 u_seed2;
+uniform vec4 u_seed3;
+uniform vec2 u_ps;
+uniform float u_amp;
+uniform float u_offset;
+uniform float u_gain;
+uniform float u_lac;      // spread
+uniform float u_exp;
+uniform float u_oct;
+uniform float u_rough;
 uniform float u_mono;
-uniform float u_exponent;
-${NOISE_LIB}
+uniform float u_alpha;    // 0 zero, 1 one, 2 random
+uniform float u_tiny;     // period ≈ 0
+uniform float u_seedr;    // random-type seed
+${NOISE_LIB_GLSL}
+float basis(int type, vec4 t) {
+  if (type == 0) return TDPerlinNoise(t.xy);
+  if (type == 1) return TDPerlinNoise(t.xyz);
+  if (type == 2) return TDPerlinNoise(t);
+  if (type == 3) return TDSimplexNoise(t.xy);
+  if (type == 5) return TDSimplexNoise(t);
+  if (type == 7 || type == 9) return tdQmap(TDPerlinNoise(t.xyz / 1.4), 0, 2);   // sparse, harmonic
+  if (type == 8) return tdQmap(TDPerlinNoise(t.xyz / 1.2), 0, 3);                // hermite
+  if (type == 10) return tdQmap(tdCellBump(t.xyz / 1.7), 1, 4);                  // alligator
+  return TDSimplexNoise(t.xyz);
+}
+float chan(int c, vec4 seed) {
+  int type = int(u_type + 0.5);
+  if (type == 6) return 2.0 * h31(vec3(floor(gl_FragCoord.xy), float(c) * 131.0 + u_seedr)) - 1.0;
+  vec4 P = vec4(4.0 * v_uv * u_ps - 2.0, 0.0, 1.0);
+  vec4 t = vec4(dot(u_m0, P), dot(u_m1, P), dot(u_m2, P), 0.0) + seed;
+  if (u_tiny > 0.5) {
+    vec2 q = floor(gl_FragCoord.xy);
+    t.xyz = 256.0 * vec3(h31(vec3(q, float(c) * 7.0 + 1.0)), h31(vec3(q, float(c) * 7.0 + 2.0)), h31(vec3(q, float(c) * 7.0 + 3.0)));
+  }
+  float g = type == 7 ? u_rough : type == 9 ? 1.0 : u_gain;
+  float n = 0.0, amp = 1.0, wsum = 0.0;
+  int oct = int(u_oct + 0.5);
+  for (int j = 0; j < 16; j++) {
+    if (j >= oct) break;
+    n += basis(type, t) * amp;
+    wsum += amp;
+    t *= u_lac;
+    amp *= g;
+  }
+  return (type == 8 || type == 10) ? n / wsum : n;
+}
 void main() {
-  vec2 uv = (v_uv + u_offset) * max(u_res.x / u_res.y, 1.0);
-  vec3 p = vec3(uv / max(u_period, 1e-4), u_time * u_speed);
-  float n = pow(clamp(fbm(p, u_harmonics), 0.0, 1.0), max(u_exponent, 1e-4));
-  vec3 rgb = u_mono > 0.5
-    ? vec3(n)
-    : vec3(n,
-           pow(clamp(fbm(p + vec3(13.7, 7.3, 5.1), u_harmonics), 0.0, 1.0), max(u_exponent, 1e-4)),
-           pow(clamp(fbm(p + vec3(29.1, 17.9, 11.3), u_harmonics), 0.0, 1.0), max(u_exponent, 1e-4)));
-  fragColor = vec4(rgb, 1.0);
+  vec4 n;
+  if (u_mono > 0.5) n = vec4(chan(0, u_seed0));
+  else n = vec4(chan(0, u_seed0), chan(1, u_seed1), chan(2, u_seed2), u_alpha > 1.5 ? chan(3, u_seed3) : 0.0);
+  if (int(u_type + 0.5) == 6) n = n * u_amp + u_offset;
+  else {
+    n *= u_amp;
+    if (u_exp != 1.0) n = sign(n) * pow(abs(n), vec4(u_exp));
+    n += u_offset;
+  }
+  fragColor = vec4(n.rgb, u_alpha < 0.5 ? 0.0 : u_alpha < 1.5 ? 1.0 : n.a);
 }
 `;
 
@@ -327,28 +353,83 @@ void main() {
 }
 `;
 
-export const blurGlsl = `${PRE}
-uniform sampler2D u_tex0;
-uniform vec2 u_dir;
-uniform float u_size;
-void main() {
-  float radius = max(u_size, 0.0);
-  if (radius < 0.01) { fragColor = texture(u_tex0, v_uv); return; }
-  float sigma = max(radius / 2.0, 0.5);
-  vec2 texel = u_dir / u_res;
-  vec4 sum = vec4(0.0);
-  float norm = 0.0;
-  for (int i = -15; i <= 15; i++) {
-    float x = float(i);
-    if (abs(x) > radius) continue;
-    float w = exp(-(x * x) / (2.0 * sigma * sigma));
-    sum += texture(u_tex0, v_uv + texel * x) * w;
-    norm += w;
-  }
-  fragColor = sum / max(norm, 1e-6);
+/**
+ * Blur TOP kernel, TouchDesigner-faithful (measured: 52 images within
+ * 7.5e-7): S taps (TD `size` = full width) at (i − (S−1)/2)·step, each
+ * weighted by the continuous kernel integrated over its texel. The weights
+ * telescope to 2·F(1), so they are computed here without a normalising loop
+ * (same formulas as tdmath.blurKernel; Gaussian uses Abramowitz–Stegun
+ * 7.1.26 for erf, ≤1.5e-7). Types: 0 catmull (positive lobe only), 1
+ * gaussian exp(−(1.5v)²), 2 box — measured; 3 bartlette, 4 sinc, 5 hanning,
+ * 6 blackman — standard windows (inferred). Kernel coordinate inset 1/1024.
+ */
+const BLUR_KERNEL_GLSL = `
+float blurErf(float x) {
+  float s = sign(x); x = abs(x);
+  float t = 1.0 / (1.0 + 0.3275911 * x);
+  return s * (1.0 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x));
+}
+float blurSi(float x) {
+  float sum = 0.0, term = x;
+  for (int n = 0; n < 30; n++) { sum += term / float(2 * n + 1); term *= -x * x / float((2 * n + 2) * (2 * n + 3)); }
+  return sum;
+}
+float blurFk(float v, int type) {
+  if (type == 1) return 0.59081795 * blurErf(1.5 * v);
+  if (type == 2) return v;
+  if (type == 3) return v - 0.5 * v * v;
+  if (type == 4) return blurSi(6.28318531 * v) / 6.28318531;
+  if (type == 5) return 0.5 * v + sin(3.14159265 * v) / 6.28318531;
+  if (type == 6) return 0.42 * v + sin(3.14159265 * v) / 6.28318531 + 0.08 / 6.28318531 * sin(6.28318531 * v);
+  return v - 0.83333333 * v * v * v + 0.375 * v * v * v * v;
+}
+float blurF(float u, int type) {
+  float d = 1.0 / 1024.0, a = min(abs(u), 1.0);
+  return sign(u) * (min(a, d) + (1.0 - d) * blurFk(max(a - d, 0.0) / (1.0 - d), type));
 }
 `;
 
+export const blurGlsl = `${PRE}
+uniform sampler2D u_tex0;
+uniform vec2 u_dir;      // (1,0) horizontal or (0,1) vertical
+uniform float u_taps;    // S = round(size · filterscale)
+uniform float u_step;    // sample step, in pixels of this pass's source
+uniform float u_type;    // kernel type (see above)
+${BLUR_KERNEL_GLSL}
+void main() {
+  int S = int(u_taps + 0.5);
+  int type = int(u_type + 0.5);
+  vec2 texel = u_dir / vec2(textureSize(u_tex0, 0));
+  float R = 0.5 * float(S), c = 0.5 * float(S - 1);
+  float norm = 0.5 / blurF(1.0, type);
+  float fl = -blurF(1.0, type);            // left edge of tap 0 sits at −S/2
+  vec4 sum = vec4(0.0);
+  for (int i = 0; i < 4096; i++) {
+    if (i >= S) break;
+    float x = float(i) - c;
+    float fr = blurF((x + 0.5) / R, type);
+    sum += (fr - fl) * norm * texture(u_tex0, v_uv + texel * (x * u_step));
+    fl = fr;
+  }
+  fragColor = sum;
+}
+`;
+
+/** One bilinear tap per output pixel: Blur preshrink and the final upsample. */
+export const resampleGlsl = `${PRE}
+uniform sampler2D u_tex0;
+void main() { fragColor = texture(u_tex0, v_uv); }
+`;
+
+/**
+ * Composite TOP, TouchDesigner-faithful: premultiplied RGBA, the 46 TD
+ * operations (complib.ts), inputs folded left — ((in0 ∘ in1) ∘ in2) … with
+ * A = the accumulated upper layer (TD's over: A + B·(1 − A.a)). Input 0 is
+ * placed by the transform page (prefit fill, forward R·S·(p + t): the
+ * translate is scaled by sx/sy, then rotated) with the overlay extend mode;
+ * zero lets out-of-bounds texels join the bilinear filter as transparent
+ * (half-texel fade at the border), as TD does.
+ */
 export const compositeGlsl = `${PRE}
 uniform sampler2D u_tex0;
 uniform sampler2D u_tex1;
@@ -356,25 +437,35 @@ uniform sampler2D u_tex2;
 uniform sampler2D u_tex3;
 uniform float u_op;
 uniform float u_count;
-vec4 blend(vec4 base, vec4 layer) {
-  if (u_op < 0.5)      return vec4(mix(base.rgb, layer.rgb, layer.a), max(base.a, layer.a)); // over
-  else if (u_op < 1.5) return vec4(base.rgb + layer.rgb, max(base.a, layer.a));              // add
-  else if (u_op < 2.5) return vec4(base.rgb * layer.rgb, base.a);                            // multiply
-  else if (u_op < 3.5) return vec4(1.0 - (1.0 - base.rgb) * (1.0 - layer.rgb), max(base.a, layer.a)); // screen
-  else if (u_op < 4.5) return vec4(base.rgb - layer.rgb, base.a);                            // subtract
-  else                 return vec4(abs(base.rgb - layer.rgb), max(base.a, layer.a));         // difference
+uniform float u_swap;
+uniform float u_ext;      // overlay extend: 0 zero, 1 hold, 2 repeat, 3 mirror
+uniform vec4 u_xf;        // cos, sin, 1/sx, 1/sy
+uniform vec4 u_ovc;       // overlay centre (uv), output aspect, identity flag
+${COMP_LIB_GLSL}
+vec4 overlaySample(vec2 uv) {
+  if (u_ovc.w > 0.5) return texture(u_tex0, uv);      // identity transform: plain sampling
+  vec2 d = (uv - u_ovc.xy) * vec2(u_ovc.z, 1.0);
+  d = vec2(u_xf.x * d.x + u_xf.y * d.y, -u_xf.y * d.x + u_xf.x * d.y);
+  vec2 ov = vec2(d.x / u_ovc.z * u_xf.z, d.y * u_xf.w) + 0.5;
+  int ext = int(u_ext + 0.5);
+  if (ext == 0) {
+    vec2 sz = vec2(textureSize(u_tex0, 0));
+    vec2 lo = clamp(ov * sz + 0.5, 0.0, 1.0), hi = clamp((1.0 - ov) * sz + 0.5, 0.0, 1.0);
+    float cover = lo.x * lo.y * hi.x * hi.y;
+    if (cover <= 0.0) return vec4(0.0);
+    return texture(u_tex0, clamp(ov, 0.0, 1.0)) * cover;
+  }
+  if (ext == 2) ov = fract(ov);
+  else if (ext == 3) ov = 1.0 - abs(mod(ov, 2.0) - 1.0);
+  return texture(u_tex0, clamp(ov, 0.0, 1.0));
 }
+vec4 step2(vec4 acc, vec4 next, int op) { return u_swap > 0.5 ? tdComp(next, acc, op) : tdComp(acc, next, op); }
 void main() {
-  // TD-compatible layer order: input 0 is the TOP layer, the last input is the base
-  vec4 t0 = texture(u_tex0, v_uv);
-  vec4 t1 = texture(u_tex1, v_uv);
-  vec4 t2 = texture(u_tex2, v_uv);
-  vec4 t3 = texture(u_tex3, v_uv);
-  vec4 c;
-  if (u_count > 3.5)      { c = t3; c = blend(c, t2); c = blend(c, t1); c = blend(c, t0); }
-  else if (u_count > 2.5) { c = t2; c = blend(c, t1); c = blend(c, t0); }
-  else if (u_count > 1.5) { c = t1; c = blend(c, t0); }
-  else                    { c = t0; }
+  int n = int(u_count + 0.5), op = int(u_op + 0.5);
+  vec4 c = overlaySample(v_uv);
+  if (n > 1) c = step2(c, texture(u_tex1, v_uv), op);
+  if (n > 2) c = step2(c, texture(u_tex2, v_uv), op);
+  if (n > 3) c = step2(c, texture(u_tex3, v_uv), op);
   fragColor = c;
 }
 `;
@@ -394,11 +485,12 @@ export const lookupGlsl = `${PRE}
 uniform sampler2D u_tex0;   // source
 uniform sampler2D u_tex1;   // lookup ramp (sampled across its width)
 uniform float u_offset;
-uniform int u_source;       // 0 = luminance, 1 = red, 2 = alpha
+uniform float u_source;     // 0 = luminance, 1 = red, 2 = alpha (float: the backend uploads numbers with uniform1f)
 void main() {
   vec4 src = texture(u_tex0, v_uv);
-  float i = u_source == 1 ? src.r
-          : u_source == 2 ? src.a
+  int s = int(u_source + 0.5);
+  float i = s == 1 ? src.r
+          : s == 2 ? src.a
           : dot(src.rgb, vec3(0.2126, 0.7152, 0.0722));   // TD luminance = Rec.709
   float u = clamp(i + u_offset, 0.0, 1.0);
   vec4 c = texture(u_tex1, vec2(u, 0.5));
