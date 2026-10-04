@@ -12,7 +12,7 @@
 import {
   translateTdExpr,
   type Family, type GraphJSON, type ImportReport, type NodeJSON,
-  type ParamValueJSON, type WireJSON,
+  type ParamVal, type ParamValueJSON, type WireJSON,
 } from '@webtoe/core';
 import { decodeTdSidecar } from './tdContainer';
 
@@ -51,6 +51,7 @@ const TYPE_MAP: Record<string, string> = {
   'TOP:multiply': 'top:composite',
   'TOP:displace': 'top:displace',
   'TOP:edge': 'top:edge',
+  'TOP:monochrome': 'top:monochrome',
   'TOP:feedback': 'top:feedback',
   'TOP:moviefilein': 'top:imagein',
   'TOP:videodevin': 'top:camerain',
@@ -154,8 +155,10 @@ const TYPE_MAP: Record<string, string> = {
   'DAT:out': 'dat:out',
 };
 
-/** implied parameter presets for collapsed type mappings */
-const TYPE_PRESETS: Record<string, Record<string, string>> = {
+/** Implied parameter presets for collapsed type mappings, and TD defaults that
+ *  differ from WebToe's own (TD omits default-valued parms from .parm files,
+ *  so these apply whenever the file is silent; stored parms override them). */
+const TYPE_PRESETS: Record<string, Record<string, ParamVal>> = {
   'TOP:over': { operation: 'over' },
   'TOP:add': { operation: 'add' },
   'TOP:multiply': { operation: 'multiply' },
@@ -163,8 +166,19 @@ const TYPE_PRESETS: Record<string, Record<string, string>> = {
 
 type ParamRule =
   | { to: string }
-  | { to: string; menu: Record<string, string> }
-  | { toColor: string; channel: number };
+  | { to: string; menu: Record<string, ParamVal> }
+  /** gather `channel` into colour param `toColor`; unset channels start from `base` (default all 1) */
+  | { toColor: string; channel: number; base?: number[] };
+
+/** menu rule whose TD tokens equal the WebToe tokens */
+const ident = (...tokens: string[]): Record<string, string> => Object.fromEntries(tokens.map((t) => [t, t]));
+
+/** TD channel-selector tokens (Monochrome rgb/alpha, Edge select) */
+const TD_CHANNEL_TOKENS = ['luminance', 'red', 'green', 'blue', 'alpha', 'rgbaverage', 'average', 'rgbmax', 'max', 'zero', 'one'];
+
+const rgbaRules = (td: string, to: string, base?: number[]): Record<string, ParamRule> => Object.fromEntries(
+  ['r', 'g', 'b', 'a'].map((c, i) => [`${td}${c}`, base ? { toColor: to, channel: i, base } : { toColor: to, channel: i }]),
+);
 
 /** shared object-COMP transform page (TD tokens are 1:1 with ours) */
 const XFORM_RULES: Record<string, ParamRule> = Object.fromEntries(
@@ -186,6 +200,24 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     contrast: { to: 'contrast' },
     opacity: { to: 'opacity' },
     invert: { to: 'invert' },
+    blacklevel: { to: 'blacklevel' },
+    inlow: { to: 'inlow' },
+    inhigh: { to: 'inhigh' },
+    outlow: { to: 'outlow' },
+    outhigh: { to: 'outhigh' },
+    ...rgbaRules('low', 'low', [0, 0, 0, 0]),
+    ...rgbaRules('high', 'high'),
+    gamma2: { to: 'gamma2' },
+    brightness2: { to: 'brightness2' },
+    clamp: { to: 'clamp' },
+    clamplow2: { to: 'clamplow2' },
+    clamphigh2: { to: 'clamphigh2' },
+    premultrgbbyalpha: { to: 'premultrgbbyalpha' },
+  },
+  'TOP:monochrome': {
+    rgb: { to: 'rgb', menu: ident(...TD_CHANNEL_TOKENS) },
+    alpha: { to: 'alpha', menu: ident(...TD_CHANNEL_TOKENS) },
+    clamp: { to: 'clamp' },
   },
   'TOP:blur': { size: { to: 'size' } },
   'TOP:transform': {
@@ -199,8 +231,21 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     extend: { to: 'extend', menu: { hold: 'hold', zero: 'zero', repeat: 'cycle', mirror: 'mirror' } },
   },
   'TOP:ramp': {
-    type: { to: 'type', menu: { horz: 'linear', vert: 'linear', radial: 'radial', circular: 'circular' } },
+    // vertical ramps used to collapse to 'linear' and import as horizontal
+    type: {
+      to: 'type',
+      menu: { horz: 'horizontal', horizontal: 'horizontal', vert: 'vertical', vertical: 'vertical', radial: 'radial', circular: 'circular' },
+    },
     phase: { to: 'phase' },
+    period: { to: 'period' },
+    position1: { to: 'positionx' },
+    position2: { to: 'positiony' },
+    extendleft: { to: 'extendleft', menu: { ...ident('hold', 'zero', 'repeat', 'mirror', 'black'), blockclamptoblack: 'black' } },
+    extendright: { to: 'extendright', menu: { ...ident('sameasleft', 'hold', 'zero', 'repeat', 'mirror', 'black'), blockclamptoblack: 'black' } },
+    interpnotches: { to: 'interp', menu: ident('step', 'linear', 'easeineaseout', 'hermite') },
+    tension: { to: 'tension' },
+    fitaspect: { to: 'fitaspect', menu: ident('fithorz', 'fitvert', 'fitbest', 'fitoutside', 'fill') },
+    premultrgbbyalpha: { to: 'premultrgbbyalpha' },
     dat: { to: 'dat' },
     color1: { toColor: 'colorb', channel: 0 },
     color2: { toColor: 'colorb', channel: 1 },
@@ -219,7 +264,17 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
     weight1: { to: 'weight' },
     offsetweight1: { to: 'weight' },
   },
-  'TOP:edge': { strength: { to: 'strength' } },
+  'TOP:edge': {
+    strength: { to: 'strength' },
+    offset1: { to: 'offsetx' },
+    offset2: { to: 'offsety' },
+    blacklevel: { to: 'blacklevel' },
+    select: { to: 'select', menu: ident(...TD_CHANNEL_TOKENS.slice(0, 9)) },
+    ...rgbaRules('edgecolor', 'edgecolor'),
+    premultrgbbyalpha: { to: 'premultrgbbyalpha' },
+    alphaoutputmenu: { to: 'alphaoutput', menu: ident('edge', 'one', 'zero') },
+    combineinput: { to: 'compinput', menu: { compedge: true, edgeonly: false } },
+  },
   'TOP:moviefilein': { file: { to: 'file' } },
   'CHOP:lfo': {
     type: { to: 'wave', menu: { sin: 'sin', square: 'square', tri: 'tri', triangle: 'tri', ramp: 'saw', saw: 'saw', pulse: 'pulse' } },
@@ -599,7 +654,7 @@ export const toedirLoader: ProjectLoader = {
             value = first !== '' && Number.isFinite(Number(first)) ? Number(first) : first;
           }
           if ('toColor' in rule) {
-            colorAcc[rule.toColor] ??= [1, 1, 1, 1];
+            colorAcc[rule.toColor] ??= [...(rule.base ?? [1, 1, 1, 1])];
             colorAcc[rule.toColor][rule.channel] = Number(value) || 0;
           } else if ('menu' in rule) {
             const mappedVal = rule.menu[String(value)];

@@ -3,8 +3,17 @@ import type {
 } from '@webtoe/core';
 import * as glsl from './glsl';
 import * as wgsl from './wgsl';
+import {
+  RAMP_KC, RAMP_KP, RAMP_MAX_KEYS, parseRampDat, rampKeys,
+} from './tdmath';
 
 const F = 'TOP' as const;
+
+/** TD channel-selector menu (Monochrome rgb/alpha, Edge select) — order = shader code. */
+const TD_CHANNELS = ['luminance', 'red', 'green', 'blue', 'alpha', 'rgbaverage', 'average', 'rgbmax', 'max', 'zero', 'one'];
+/** TD extend tokens → shader codes shared by Ramp. */
+const EXTEND_CODE: Record<string, number> = { hold: 0, zero: 1, repeat: 2, mirror: 3, black: 4 };
+const RAMP_TYPES = ['horizontal', 'vertical', 'radial', 'circular'];
 const DEFAULT_RES: [number, number] = [1280, 720];
 
 function asTop(o: OpOutput | undefined): TextureOut | null {
@@ -25,6 +34,12 @@ function resolution(ctx: CookCtx, firstInput: TextureHandle | null): { w: number
   }
   if (firstInput) return { w: firstInput.width, h: firstInput.height };
   return { w: DEFAULT_RES[0], h: DEFAULT_RES[1] };
+}
+
+/** A colour param as exactly four numbers (missing channels from `d`). */
+function color4(v: unknown, d: [number, number, number, number]): number[] {
+  const a = Array.isArray(v) ? v : [];
+  return d.map((x, i) => (typeof a[i] === 'number' && Number.isFinite(a[i]) ? a[i] : x));
 }
 
 function ensureShader(ctx: CookCtx, spec: OpSpec): void {
@@ -121,12 +136,23 @@ export const topOps: OpSpec[] = [
     family: F,
     label: 'ramp',
     inputs: { min: 0, max: 0 },
+    // TouchDesigner-faithful ramp (docs/TD-PARITY.md "Fidelity"): TD's key
+    // wrap, phase/period per type, extend modes, interpolation, fit aspect.
     params: [
-      { key: 'type', type: 'menu', default: 'linear', menu: ['linear', 'radial', 'circular'] },
-      { key: 'phase', type: 'float', default: 0, min: 0, max: 1 },
+      { key: 'type', type: 'menu', default: 'horizontal', menu: RAMP_TYPES },
+      { key: 'phase', type: 'float', default: 0, min: -1, max: 1 },
+      { key: 'period', type: 'float', default: 1, min: 0.01, max: 4 },
+      { key: 'positionx', label: 'position x (radial/circular centre)', type: 'float', default: 0, min: -1, max: 1 },
+      { key: 'positiony', label: 'position y', type: 'float', default: 0, min: -1, max: 1 },
       { key: 'colora', type: 'color', default: [0, 0, 0, 1] },
       { key: 'colorb', type: 'color', default: [1, 1, 1, 1] },
       { key: 'dat', label: 'keys DAT (pos r g b a)', type: 'string', default: '' },
+      { key: 'extendleft', type: 'menu', default: 'repeat', menu: ['hold', 'zero', 'repeat', 'mirror', 'black'] },
+      { key: 'extendright', type: 'menu', default: 'sameasleft', menu: ['sameasleft', 'hold', 'zero', 'repeat', 'mirror', 'black'] },
+      { key: 'interp', label: 'interpolate keys', type: 'menu', default: 'linear', menu: ['step', 'linear', 'easeineaseout', 'hermite'] },
+      { key: 'tension', type: 'float', default: 0, min: -1, max: 1 },
+      { key: 'fitaspect', type: 'menu', default: 'fithorz', menu: ['fithorz', 'fitvert', 'fitbest', 'fitoutside', 'fill'] },
+      { key: 'premultrgbbyalpha', label: 'premultiply rgb by alpha', type: 'toggle', default: true },
       ...resParams('custom'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -137,40 +163,55 @@ export const topOps: OpSpec[] = [
       const { w, h } = resolution(ctx, null);
 
       // TouchDesigner keeps a ramp's real gradient in a keys DAT with
-      // `pos r g b a` rows; the colour params are only the first key. Reading
-      // it is the difference between a grey wash and the artwork's palette.
-      const pos = new Array(8).fill(0);
-      const cr = new Array(8).fill(0), cg = new Array(8).fill(0);
-      const cb = new Array(8).fill(0), ca = new Array(8).fill(1);
-      let stops = 0;
+      // `pos r g b a` rows; the colour params stand in when there is none.
+      let raw: number[][] = [];
       const datPath = ctx.paramStr('dat');
       if (datPath) {
         const dat = ctx.engine.graph.resolve(datPath, ctx.node.parent ?? ctx.node);
-        const text = dat?.text ?? '';
-        if (text) {
-          const rows = text.trim().split('\n').map((r) => r.split('\t'));
-          const body = rows.length && /pos/i.test(rows[0][0] ?? '') ? rows.slice(1) : rows;
-          for (const r of body) {
-            if (stops >= 8 || r.length < 5) continue;
-            const v = r.map(Number);
-            if (v.some((x) => !Number.isFinite(x))) continue;
-            pos[stops] = v[0];
-            cr[stops] = v[1]; cg[stops] = v[2]; cb[stops] = v[3]; ca[stops] = v[4];
-            stops++;
-          }
-        }
+        if (dat?.text) raw = parseRampDat(dat.text);
       }
+      if (!raw.length) {
+        const a = ctx.param('colora') as number[], b = ctx.param('colorb') as number[];
+        raw = [[0, ...a], [1, ...b]];
+      }
+      const keys = rampKeys(raw);
+      if (keys.length > RAMP_MAX_KEYS) ctx.node.error = `ramp: ${keys.length} keys, only ${RAMP_MAX_KEYS} used`;
+      const n = Math.min(RAMP_MAX_KEYS, keys.length);
+      const uniforms: Record<string, number | number[]> = {};
+      for (let i = 0; i < RAMP_MAX_KEYS; i++) {
+        const k = keys[Math.min(i, n - 1)];
+        uniforms[RAMP_KC[i]] = [k[1], k[2], k[3], k[4]];
+      }
+      for (let j = 0; j < RAMP_KP.length; j++) {
+        uniforms[RAMP_KP[j]] = [0, 1, 2, 3].map((q) => keys[Math.min(j * 4 + q, n - 1)][0]);
+      }
+
+      // legacy WebToe value 'linear' = horizontal
+      const typeStr = ctx.paramStr('type');
+      const type = typeStr === 'linear' ? 0 : Math.max(0, RAMP_TYPES.indexOf(typeStr));
+      const extl = EXTEND_CODE[ctx.paramStr('extendleft')] ?? 2;
+      const er = ctx.paramStr('extendright');
+      const extr = er === 'sameasleft' ? extl : EXTEND_CODE[er] ?? extl;
+      const asp = w / h, fa = ctx.paramStr('fitaspect');
+      const aspect = fa === 'fill' ? [1, 1]
+        : fa === 'fithorz' || (fa === 'fitbest' && asp < 1) || (fa === 'fitoutside' && asp >= 1) ? [1, 1 / asp]
+          : [asp, 1];
 
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
         uniforms: {
-          u_type: ctx.menuIndex('type'),
+          ...uniforms,
+          u_type: type,
           u_phase: ctx.paramNum('phase'),
-          u_colora: ctx.param('colora') as number[],
-          u_colorb: ctx.param('colorb') as number[],
-          u_stopCount: stops,
-          u_stopPos: pos,
-          u_stopR: cr, u_stopG: cg, u_stopB: cb, u_stopA: ca,
+          u_repeat: 1 / Math.max(1e-6, ctx.paramNum('period')),
+          u_pos: [ctx.paramNum('positionx'), ctx.paramNum('positiony')],
+          u_aspect: aspect,
+          u_extl: extl,
+          u_extr: extr,
+          u_interp: Math.max(0, ctx.menuIndex('interp')),
+          u_tension: ctx.paramNum('tension'),
+          u_n: n,
+          u_premul: ctx.paramBool('premultrgbbyalpha') ? 1 : 0,
         },
         inputs: [],
         output: { width: w, height: h },
@@ -261,12 +302,27 @@ export const topOps: OpSpec[] = [
     family: F,
     label: 'level',
     inputs: { min: 1, max: 1 },
+    // TouchDesigner page order (docs/TD-PARITY.md "Fidelity"); keys of the
+    // first page keep their WebToe names (brightness = TD brightness1, gamma = gamma1)
     params: [
-      { key: 'brightness', type: 'float', default: 1, min: 0, max: 4 },
-      { key: 'contrast', type: 'float', default: 1, min: 0, max: 4 },
-      { key: 'gamma', type: 'float', default: 1, min: 0.1, max: 4 },
-      { key: 'opacity', type: 'float', default: 1, min: 0, max: 1 },
-      { key: 'invert', type: 'toggle', default: false },
+      { key: 'invert', type: 'float', default: 0, min: 0, max: 1, page: 'pre' },
+      { key: 'blacklevel', type: 'float', default: 0, min: 0, max: 1, page: 'pre' },
+      { key: 'brightness', label: 'brightness1', type: 'float', default: 1, min: 0, max: 4, page: 'pre' },
+      { key: 'gamma', label: 'gamma1', type: 'float', default: 1, min: 0.1, max: 4, page: 'pre' },
+      { key: 'contrast', type: 'float', default: 1, min: 0, max: 4, page: 'pre' },
+      { key: 'inlow', type: 'float', default: 0, min: 0, max: 1, page: 'range' },
+      { key: 'inhigh', type: 'float', default: 1, min: 0, max: 1, page: 'range' },
+      { key: 'outlow', type: 'float', default: 0, min: 0, max: 1, page: 'range' },
+      { key: 'outhigh', type: 'float', default: 1, min: 0, max: 1, page: 'range' },
+      { key: 'low', label: 'low rgba', type: 'color', default: [0, 0, 0, 0], page: 'rgba' },
+      { key: 'high', label: 'high rgba', type: 'color', default: [1, 1, 1, 1], page: 'rgba' },
+      { key: 'gamma2', type: 'float', default: 1, min: 0.1, max: 4, page: 'post' },
+      { key: 'brightness2', type: 'float', default: 1, min: 0, max: 4, page: 'post' },
+      { key: 'clamp', type: 'toggle', default: false, page: 'post' },
+      { key: 'clamplow2', label: 'clamp low', type: 'float', default: 0, min: 0, max: 1, page: 'post' },
+      { key: 'clamphigh2', label: 'clamp high', type: 'float', default: 1, min: 0, max: 1, page: 'post' },
+      { key: 'premultrgbbyalpha', label: 'premultiply rgb by alpha', type: 'toggle', default: false, page: 'post' },
+      { key: 'opacity', type: 'float', default: 1, min: 0, max: 1, page: 'post' },
       ...resParams('input'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -280,11 +336,14 @@ export const topOps: OpSpec[] = [
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
         uniforms: {
-          u_brightness: ctx.paramNum('brightness'),
+          u_pre: [ctx.paramNum('invert'), ctx.paramNum('blacklevel'), ctx.paramNum('brightness'), ctx.paramNum('gamma')],
           u_contrast: ctx.paramNum('contrast'),
-          u_gamma: ctx.paramNum('gamma'),
+          u_range: [ctx.paramNum('inlow'), ctx.paramNum('inhigh'), ctx.paramNum('outlow'), ctx.paramNum('outhigh')],
+          u_low: color4(ctx.param('low'), [0, 0, 0, 0]),
+          u_high: color4(ctx.param('high'), [1, 1, 1, 1]),
+          u_post: [ctx.paramNum('gamma2'), ctx.paramNum('brightness2'), ctx.paramBool('clamp') ? 1 : 0, ctx.paramBool('premultrgbbyalpha') ? 1 : 0],
+          u_clamp2: [ctx.paramNum('clamplow2'), ctx.paramNum('clamphigh2')],
           u_opacity: ctx.paramNum('opacity'),
-          u_invert: ctx.paramBool('invert') ? 1 : 0,
         },
         inputs: [input.tex],
         output: { width: w, height: h },
@@ -299,9 +358,12 @@ export const topOps: OpSpec[] = [
     label: 'monochrome',
     inputs: { min: 1, max: 1 },
     params: [
-      { key: 'rweight', type: 'float', default: 0.299, min: 0, max: 1 },
-      { key: 'gweight', type: 'float', default: 0.587, min: 0, max: 1 },
-      { key: 'bweight', type: 'float', default: 0.114, min: 0, max: 1 },
+      { key: 'rgb', type: 'menu', default: 'luminance', menu: [...TD_CHANNELS, 'custom'] },
+      { key: 'alpha', type: 'menu', default: 'alpha', menu: [...TD_CHANNELS, 'custom'] },
+      { key: 'clamp', type: 'toggle', default: true },
+      { key: 'rweight', label: 'custom r weight', type: 'float', default: 0.2126, min: 0, max: 1 },
+      { key: 'gweight', label: 'custom g weight', type: 'float', default: 0.7152, min: 0, max: 1 },
+      { key: 'bweight', label: 'custom b weight', type: 'float', default: 0.0722, min: 0, max: 1 },
       ...resParams('input'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -312,9 +374,15 @@ export const topOps: OpSpec[] = [
       const input = asTop(ctx.inputs[0]);
       if (!input) return placeholder(ctx, [0.3, 0.3, 0.3, 1]);
       const { w, h } = resolution(ctx, input.tex);
+      const sel = (k: string, d: number) => { const i = ctx.menuIndex(k); return i < 0 ? d : i; };
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
-        uniforms: { u_weights: [ctx.paramNum('rweight'), ctx.paramNum('gweight'), ctx.paramNum('bweight')] },
+        uniforms: {
+          u_rgb: sel('rgb', 0),
+          u_alpha: sel('alpha', 4),
+          u_clamp: ctx.paramBool('clamp') ? 1 : 0,
+          u_weights: [ctx.paramNum('rweight'), ctx.paramNum('gweight'), ctx.paramNum('bweight')],
+        },
         inputs: [input.tex],
         output: { width: w, height: h },
       });
@@ -511,10 +579,18 @@ export const topOps: OpSpec[] = [
     family: F,
     label: 'edge',
     inputs: { min: 1, max: 1 },
+    // TouchDesigner-faithful Sobel edge (docs/TD-PARITY.md "Fidelity"):
+    // e = clamp(√(1−bl)·√strength·|∇|/√offset − bl); TD's strength default is 1
     params: [
-      { key: 'strength', type: 'float', default: 4, min: 0, max: 20 },
+      { key: 'strength', type: 'float', default: 1, min: 0, max: 50 },
+      { key: 'offsetx', label: 'sample step x (px)', type: 'float', default: 1, min: 0.1, max: 16 },
+      { key: 'offsety', label: 'sample step y (px)', type: 'float', default: 1, min: 0.1, max: 16 },
+      { key: 'blacklevel', type: 'float', default: 0, min: 0, max: 1 },
+      { key: 'select', type: 'menu', default: 'luminance', menu: TD_CHANNELS.slice(0, 9) },
       { key: 'edgecolor', type: 'color', default: [1, 1, 1, 1] },
-      { key: 'compinput', type: 'toggle', default: false },
+      { key: 'premultrgbbyalpha', label: 'premultiply edge colour', type: 'toggle', default: true },
+      { key: 'alphaoutput', type: 'menu', default: 'edge', menu: ['edge', 'one', 'zero'] },
+      { key: 'compinput', label: 'composite edge over input', type: 'toggle', default: false },
       ...resParams('input'),
     ],
     backends: ['webgl2', 'webgpu'],
@@ -525,12 +601,18 @@ export const topOps: OpSpec[] = [
       const input = asTop(ctx.inputs[0]);
       if (!input) return placeholder(ctx, [0.4, 0.4, 0.2, 1]);
       const { w, h } = resolution(ctx, input.tex);
+      const col = color4(ctx.param('edgecolor'), [1, 1, 1, 1]);
+      const k = ctx.paramBool('premultrgbbyalpha') ? col[3] : 1;
       const tex = ctx.gpu!.runPass(ctx.node, {
         shaderId: this.type,
         uniforms: {
           u_strength: ctx.paramNum('strength'),
-          u_edgecolor: ctx.param('edgecolor') as number[],
+          u_edgecolor: [col[0] * k, col[1] * k, col[2] * k, col[3]],
           u_compinput: ctx.paramBool('compinput') ? 1 : 0,
+          u_offset: [ctx.paramNum('offsetx'), ctx.paramNum('offsety')],
+          u_blacklevel: ctx.paramNum('blacklevel'),
+          u_select: Math.max(0, ctx.menuIndex('select')),
+          u_alphamode: Math.max(0, ctx.menuIndex('alphaoutput')),
         },
         inputs: [input.tex],
         output: { width: w, height: h },

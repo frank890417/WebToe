@@ -14,7 +14,7 @@
       { "name": "merge1", "type": "chop:merge", "family": "CHOP", "pos": [420, 180], "flags": { "display": true } },
 
       { "name": "ramp1", "type": "top:ramp", "family": "TOP", "pos": [40, 300],
-        "params": { "type": { "mode": "const", "value": "linear" },
+        "params": { "type": { "mode": "const", "value": "horizontal" },
                     "colora": { "mode": "const", "value": [0.15, 0.1, 0.5, 1] },
                     "colorb": { "mode": "const", "value": [0.95, 0.55, 0.2, 1] } } },
       { "name": "trans1", "type": "top:transform", "family": "TOP", "pos": [230, 300],

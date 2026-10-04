@@ -1,11 +1,19 @@
 /**
- * Original GLSL 300 es fragment shaders for the TOP family — written fresh
- * for WebToe. Noise/hash/sdf/color-space functions are our own renditions of
- * standard, well-known graphics techniques.
+ * GLSL 300 es fragment shaders for the TOP family.
+ *
+ * Most shaders are written fresh for WebToe. The TouchDesigner-faithful ones
+ * (level, edge, monochrome, ramp, blur, noise, composite) reproduce behaviour
+ * measured black-box against TouchDesigner by the author's EOI project (ported
+ * with permission; see docs/TD-PARITY.md "Fidelity"). Third-party algorithm
+ * code (Gustavson noise, Hocevar HSV, Hoskins hash) lives in noiselib.ts /
+ * complib.ts with its notices; see THIRD_PARTY_NOTICES.md.
  *
  * Conventions (enforced by the WebGL2 backend): `v_uv` in, `fragColor` out,
- * `u_res`/`u_time` injected, inputs bound as `u_tex0..u_tex3`.
+ * `u_res`/`u_time` injected, inputs bound as `u_tex0..u_tex3`. Scalar uniforms
+ * are always `float` (the backend uploads numbers with uniform1f) and every
+ * uniform is at most a vec4, so the same set packs for WGSL too.
  */
+import { RAMP_KC, RAMP_KP, RAMP_MAX_KEYS } from './tdmath';
 
 const PRE = `#version 300 es
 precision highp float;
@@ -77,49 +85,84 @@ void main() {
 }
 `;
 
+/**
+ * Ramp TOP, TouchDesigner-faithful (measured, see docs/TD-PARITY.md
+ * "Fidelity"). Keys arrive pre-sorted with TD's wrap keys added on the CPU
+ * (tdmath.rampKeys) as one vec4 colour per key (u_kc00..) and four positions
+ * per vec4 (u_kp0..) — every uniform is ≤ vec4 so the WGSL packing rule holds.
+ *   horizontal/vertical: t = (u − phase) / period
+ *   radial/circular:     t = base / period − phase
+ * position only moves the radial/circular centre. No antialiasing (TD's
+ * supersampling could not be reproduced, only seams differ).
+ */
+const RAMP_KEY_UNIFORMS_GLSL = `${RAMP_KC.map((n) => `uniform vec4 ${n};`).join('\n')}
+${RAMP_KP.map((n) => `uniform vec4 ${n};`).join('\n')}`;
+
 export const rampGlsl = `${PRE}
-uniform float u_type;
+uniform float u_type;      // 0 horizontal, 1 vertical, 2 radial, 3 circular
 uniform float u_phase;
-uniform vec4 u_colora;
-uniform vec4 u_colorb;
-// Multi-stop gradient from a TouchDesigner keys DAT. u_stopCount == 0 falls
-// back to the simple two-colour ramp, so hand-built patches are unaffected.
-// Separate float arrays on purpose: the backend's generic uniform setter maps
-// number[] of length 2/3/4 to vecN and anything else to uniform1fv, so a
-// vec4[8] would be uploaded wrongly. Four float[8] arrays always work.
-uniform float u_stopCount;
-uniform float u_stopPos[8];
-uniform float u_stopR[8];
-uniform float u_stopG[8];
-uniform float u_stopB[8];
-uniform float u_stopA[8];
+uniform float u_repeat;    // 1 / period
+uniform vec2 u_pos;        // radial/circular centre offset (fraction)
+uniform vec2 u_aspect;     // fitaspect scale for radial/circular
+uniform float u_extl;      // extend codes: 0 hold, 1 zero, 2 repeat, 3 mirror, 4 black
+uniform float u_extr;
+uniform float u_interp;    // 0 step, 1 linear, 2 ease in/out, 3 hermite
+uniform float u_tension;
+uniform float u_n;         // key count after wrap keys
+uniform float u_premul;
+${RAMP_KEY_UNIFORMS_GLSL}
+vec4 KC[${RAMP_MAX_KEYS}];
+float KP[${RAMP_MAX_KEYS}];
+void loadKeys() {
+${RAMP_KC.map((n, i) => `  KC[${i}] = ${n};`).join('\n')}
+${RAMP_KP.map((n, i) => `  KP[${i * 4}] = ${n}.x; KP[${i * 4 + 1}] = ${n}.y; KP[${i * 4 + 2}] = ${n}.z; KP[${i * 4 + 3}] = ${n}.w;`).join('\n')}
+}
+vec4 rampColor(float t) {
+  int n = int(u_n + 0.5);
+  int k0 = 0;                                   // last key with pos <= t
+  for (int i = 1; i < ${RAMP_MAX_KEYS}; i++) { if (i >= n) break; if (KP[i] <= t) k0 = i; }
+  int last = n - 1;
+  int k1 = min(k0 + 1, last);
+  float span = KP[k1] - KP[k0];
+  float f = t - KP[k0];
+  if (span > 0.0) f /= span;
+  vec4 c0 = KC[k0], c1 = KC[k1];
+  int mode = int(u_interp + 0.5);
+  if (mode == 0) return c0;
+  if (mode == 3) {                              // cardinal spline, tangent (1 − tension)·Δ/2
+    vec4 m0 = (1.0 - u_tension) * 0.5 * (c1 - KC[max(k0 - 1, 0)]);
+    vec4 m1 = (1.0 - u_tension) * 0.5 * (KC[min(k0 + 2, last)] - c0);
+    float f2 = f * f, f3 = f2 * f;
+    return (2.0 * f3 - 3.0 * f2 + 1.0) * c0 + (f3 - 2.0 * f2 + f) * m0 + (f3 - f2) * m1 + (3.0 * f2 - 2.0 * f3) * c1;
+  }
+  if (mode == 2) f = 0.5 - 0.5 * cos(3.14159265 * clamp(f, 0.0, 1.0));
+  return mix(c0, c1, f);
+}
+float rampFold(float t, int ext) {
+  if (ext == 2) return t - floor(t);
+  if (ext == 3) { float m = mod(abs(t), 2.0); return m > 1.0 ? 2.0 - m : m; }
+  return clamp(t, 0.0, 1.0);
+}
+vec4 rampOutside(float t, int ext) {
+  if (ext == 1) return vec4(0.0);
+  if (ext == 4) return vec4(0.0, 0.0, 0.0, 1.0);
+  return rampColor(rampFold(t, ext));
+}
 void main() {
+  loadKeys();
+  int type = int(u_type + 0.5);
   float t;
-  if (u_type < 0.5) {
-    t = v_uv.x;
-  } else if (u_type < 1.5) {
-    t = clamp(length(v_uv - 0.5) * 2.0, 0.0, 1.0);
-  } else {
-    t = atan(v_uv.y - 0.5, v_uv.x - 0.5) / 6.28318530718 + 0.5;
+  if (type == 0) t = v_uv.x;
+  else if (type == 1) t = v_uv.y;
+  else {
+    vec2 d = (v_uv - 0.5 - u_pos) * u_aspect;
+    if (type == 2) { t = atan(d.y, d.x) / 6.28318530; if (t < 0.0) t += 1.0; }
+    else t = 2.0 * length(d);
   }
-  t = fract(t + u_phase);
-  if (u_stopCount > 0.5) {
-    int n = int(u_stopCount);
-    vec4 c = vec4(u_stopR[0], u_stopG[0], u_stopB[0], u_stopA[0]);
-    for (int i = 0; i < 7; i++) {
-      if (i + 1 >= n) break;
-      float a = u_stopPos[i], b = u_stopPos[i + 1];
-      if (t >= a) {
-        float f = clamp((t - a) / max(b - a, 1e-5), 0.0, 1.0);
-        vec4 c0 = vec4(u_stopR[i], u_stopG[i], u_stopB[i], u_stopA[i]);
-        vec4 c1 = vec4(u_stopR[i + 1], u_stopG[i + 1], u_stopB[i + 1], u_stopA[i + 1]);
-        c = mix(c0, c1, f);
-      }
-    }
-    fragColor = c;
-  } else {
-    fragColor = mix(u_colora, u_colorb, t);
-  }
+  t = type <= 1 ? (t - u_phase) * u_repeat : t * u_repeat - u_phase;
+  vec4 c = t < 0.0 ? rampOutside(t, int(u_extl + 0.5)) : t > 1.0 ? rampOutside(t, int(u_extr + 0.5)) : rampColor(t);
+  if (u_premul > 0.5) c.rgb *= c.a;
+  fragColor = c;
 }
 `;
 
@@ -170,30 +213,85 @@ void main() {
 }
 `;
 
+/**
+ * Level TOP, TouchDesigner order (measured: 14 parameter sets × 2 clamp modes
+ * within 1e-3). Works on premultiplied RGB; alpha only sees lowa/higha/opacity.
+ *   invert → blacklevel (no clamp) → brightness1 → [clamp] → gamma1 → contrast
+ *   (pivot 0.5) → in/out range → per-channel low/high → gamma2 → brightness2
+ *   → post clamp → premultiply → opacity (multiplies RGB and alpha).
+ * WebToe textures are 8-bit fixed, so TD's automatic input clamp is always on:
+ * the input is clamped and clamped again after brightness1, never after.
+ */
 export const levelGlsl = `${PRE}
 uniform sampler2D u_tex0;
-uniform float u_brightness;
+uniform vec4 u_pre;      // invert, blacklevel, brightness1, gamma1
 uniform float u_contrast;
-uniform float u_gamma;
+uniform vec4 u_range;    // inlow, inhigh, outlow, outhigh
+uniform vec4 u_low;      // lowr, lowg, lowb, lowa
+uniform vec4 u_high;     // highr, highg, highb, higha
+uniform vec4 u_post;     // gamma2, brightness2, post clamp on, premultiply on
+uniform vec2 u_clamp2;   // clamplow2, clamphigh2
 uniform float u_opacity;
-uniform float u_invert;
+vec3 lvGamma(vec3 x, float g) { return g == 1.0 ? x : pow(max(x, 0.0), vec3(1.0 / max(g, 1e-6))); }
 void main() {
-  vec4 c = texture(u_tex0, v_uv);
-  vec3 rgb = c.rgb * u_brightness;
-  rgb = (rgb - 0.5) * u_contrast + 0.5;
-  rgb = pow(max(rgb, 0.0), vec3(1.0 / max(u_gamma, 1e-4)));
-  rgb = mix(rgb, 1.0 - rgb, u_invert);
-  fragColor = vec4(rgb, c.a * u_opacity);
+  vec4 a = texture(u_tex0, v_uv);
+  vec3 x = clamp(a.rgb, 0.0, 1.0);
+  x = x + u_pre.x * (1.0 - 2.0 * x);
+  x = u_pre.y >= 1.0 ? vec3(0.0) : (x - u_pre.y) / (1.0 - u_pre.y);
+  x = x * u_pre.z;
+  x = clamp(x, 0.0, 1.0);
+  x = lvGamma(x, u_pre.w);
+  x = (x - 0.5) * u_contrast + 0.5;
+  x = (x - u_range.x) / (u_range.y == u_range.x ? 1.0 : u_range.y - u_range.x);
+  x = u_range.z + x * (u_range.w - u_range.z);
+  x = u_low.rgb + x * (u_high.rgb - u_low.rgb);
+  x = lvGamma(x, u_post.x);
+  x = x * u_post.y;
+  float al = u_low.a + a.a * (u_high.a - u_low.a);
+  if (u_post.z > 0.5) x = clamp(x, u_clamp2.x, u_clamp2.y);
+  if (u_post.w > 0.5) x *= al;
+  fragColor = vec4(x * u_opacity, al * u_opacity);
 }
 `;
 
+/** Channel selector shared by Monochrome/Edge (TD menu order):
+ *  0 luminance (Rec.709), 1 red, 2 green, 3 blue, 4 alpha, 5 rgbaverage,
+ *  6 average, 7 rgbmax, 8 max, 9 zero, 10 one. */
+const TD_CHANNEL_GLSL = `
+float tdChannel(vec4 c, int s) {
+  if (s == 1) return c.r;
+  if (s == 2) return c.g;
+  if (s == 3) return c.b;
+  if (s == 4) return c.a;
+  if (s == 5) return (c.r + c.g + c.b) / 3.0;
+  if (s == 6) return (c.r + c.g + c.b + c.a) * 0.25;
+  if (s == 7) return max(c.r, max(c.g, c.b));
+  if (s == 8) return max(max(c.r, c.g), max(c.b, c.a));
+  if (s == 9) return 0.0;
+  if (s == 10) return 1.0;
+  return dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+`;
+
+/** Monochrome TOP: RGB and alpha each pick a channel (TD menu; luminance is
+ *  Rec.709), 'custom' (11) uses the normalised weights; clamp defaults on. */
 export const monochromeGlsl = `${PRE}
 uniform sampler2D u_tex0;
+uniform float u_rgb;
+uniform float u_alpha;
+uniform float u_clamp;
 uniform vec3 u_weights;
+${TD_CHANNEL_GLSL}
+float monoPick(vec4 c, int s) {
+  if (s == 11) return dot(c.rgb, u_weights / max(u_weights.x + u_weights.y + u_weights.z, 1e-6));
+  return tdChannel(c, s);
+}
 void main() {
   vec4 c = texture(u_tex0, v_uv);
-  float lum = dot(c.rgb, u_weights / max(u_weights.x + u_weights.y + u_weights.z, 1e-6));
-  fragColor = vec4(vec3(lum), c.a);
+  float l = monoPick(c, int(u_rgb + 0.5));
+  float a = monoPick(c, int(u_alpha + 0.5));
+  if (u_clamp > 0.5) { l = clamp(l, 0.0, 1.0); a = clamp(a, 0.0, 1.0); }
+  fragColor = vec4(vec3(l), a);
 }
 `;
 
@@ -301,30 +399,54 @@ void main() {
   vec4 src = texture(u_tex0, v_uv);
   float i = u_source == 1 ? src.r
           : u_source == 2 ? src.a
-          : dot(src.rgb, vec3(0.299, 0.587, 0.114));
+          : dot(src.rgb, vec3(0.2126, 0.7152, 0.0722));   // TD luminance = Rec.709
   float u = clamp(i + u_offset, 0.0, 1.0);
   vec4 c = texture(u_tex1, vec2(u, 0.5));
   fragColor = vec4(c.rgb, c.a * src.a);
 }
 `;
 
+/**
+ * Edge TOP, TouchDesigner-faithful (measured: 65 cases within 1.2e-7):
+ *   e = clamp(√(1−bl)·√strength·|∇| / √offset − bl, 0, 1)
+ * ∇ = 3×3 Sobel (1-2-1) of the selected channel; the 8 taps sit ±offset
+ * pixels away (bilinear, hold) and the channel is selected AFTER sampling
+ * (rgbmax/max need that). Unequal x/y offsets divide each axis by its own
+ * step (inferred). RGB = e·edge colour (pre-multiplied by its alpha when
+ * premultrgbbyalpha), alpha = e·edge alpha; compinput = edge OVER input.
+ */
 export const edgeGlsl = `${PRE}
 uniform sampler2D u_tex0;
 uniform float u_strength;
-uniform vec4 u_edgecolor;
+uniform vec4 u_edgecolor;  // already multiplied by its alpha on the CPU when premultrgbbyalpha
 uniform float u_compinput;
-float lum(vec2 uv) { return dot(texture(u_tex0, uv).rgb, vec3(0.299, 0.587, 0.114)); }
+uniform vec2 u_offset;     // sample step in input pixels (x, y)
+uniform float u_blacklevel;
+uniform float u_select;
+uniform float u_alphamode; // 0 edge, 1 one, 2 zero
+${TD_CHANNEL_GLSL}
+vec2 edgeTexel;
+float tap(float dx, float dy) {
+  return tdChannel(texture(u_tex0, v_uv + vec2(dx, dy) * u_offset * edgeTexel), int(u_select + 0.5));
+}
 void main() {
-  vec2 t = 1.0 / u_res;
-  float tl = lum(v_uv + vec2(-t.x,  t.y)), tc = lum(v_uv + vec2(0.0,  t.y)), tr = lum(v_uv + vec2( t.x,  t.y));
-  float ml = lum(v_uv + vec2(-t.x,  0.0)),                                   mr = lum(v_uv + vec2( t.x,  0.0));
-  float bl = lum(v_uv + vec2(-t.x, -t.y)), bc = lum(v_uv + vec2(0.0, -t.y)), br = lum(v_uv + vec2( t.x, -t.y));
-  float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
-  float gy = (tl + 2.0 * tc + tr) - (bl + 2.0 * bc + br);
-  float e = clamp(length(vec2(gx, gy)) * u_strength, 0.0, 1.0);
-  vec4 src = texture(u_tex0, v_uv);
-  vec4 edges = u_edgecolor * e;
-  fragColor = u_compinput > 0.5 ? vec4(mix(src.rgb, u_edgecolor.rgb, e), max(src.a, edges.a)) : edges;
+  edgeTexel = 1.0 / vec2(textureSize(u_tex0, 0));
+  float lb = tap(-1.0, -1.0), lm = tap(-1.0, 0.0), lt = tap(-1.0, 1.0);
+  float mb = tap(0.0, -1.0), mt = tap(0.0, 1.0);
+  float rb = tap(1.0, -1.0), rm = tap(1.0, 0.0), rt = tap(1.0, 1.0);
+  float gx = (rb + 2.0 * rm + rt) - (lb + 2.0 * lm + lt);
+  float gy = (lt + 2.0 * mt + rt) - (lb + 2.0 * mb + rb);
+  vec2 inv = 1.0 / max(abs(u_offset), vec2(1e-3));
+  float g = sqrt(max(u_strength, 0.0) * (gx * gx * inv.x + gy * gy * inv.y));
+  float e = clamp(g * sqrt(max(1.0 - u_blacklevel, 0.0)) - u_blacklevel, 0.0, 1.0);
+  vec4 col = vec4(e * u_edgecolor.rgb, e * u_edgecolor.a);
+  int am = int(u_alphamode + 0.5);
+  if (am == 1) col.a = 1.0; else if (am == 2) col.a = 0.0;
+  if (u_compinput > 0.5) {
+    vec4 src = texture(u_tex0, v_uv);
+    col = col + src * (1.0 - clamp(col.a, 0.0, 1.0));   // premultiplied over
+  }
+  fragColor = col;
 }
 `;
 

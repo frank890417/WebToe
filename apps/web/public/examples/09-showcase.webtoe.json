@@ -34,7 +34,7 @@
    { "name": "edge1", "type": "top:edge", "family": "TOP", "pos": [380, 40],
      "params": { "compinput": { "mode": "const", "value": true },
                  "edgecolor": { "mode": "const", "value": [0.5, 1, 0.85, 1] },
-                 "strength": { "mode": "expr", "value": 4, "expr": "2 + op('energy1')['tx'] * 6" } } },
+                 "strength": { "mode": "expr", "value": 16, "expr": "pow(2 + op('energy1')['tx'] * 6, 2)" } } },
 
    { "name": "ramp1", "type": "top:ramp", "family": "TOP", "pos": [40, 150],
      "params": { "type": { "mode": "const", "value": "circular" },

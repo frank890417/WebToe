@@ -12,7 +12,7 @@
       { "name": "displace1", "type": "top:displace", "family": "TOP", "pos": [260, 40],
         "params": { "weight": { "mode": "expr", "value": 0.08, "expr": "0.04 + op('wob1')['chan1'] * 0.04" } } },
       { "name": "edge1", "type": "top:edge", "family": "TOP", "pos": [470, 40],
-        "params": { "strength": { "mode": "const", "value": 5 },
+        "params": { "strength": { "mode": "const", "value": 25 },
                     "compinput": { "mode": "const", "value": true },
                     "edgecolor": { "mode": "const", "value": [0.4, 1, 0.8, 1] } } },
       { "name": "out1", "type": "top:out", "family": "TOP", "pos": [670, 40], "flags": { "display": true } },
