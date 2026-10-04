@@ -10,14 +10,14 @@
 
 ![WebToe editor running the lfo-garden example](docs/media/hero-lfo-garden.png)
 
-WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the whole app is ~90 KB of JS), and it reads the structure of real TouchDesigner projects through the text expansion produced by your own TD installation.
+WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the whole app is ~90 KB of JS), and it opens real TouchDesigner projects — a dropped `.toe` is decoded right in the browser (research preview), with your own TD installation's `toeexpand` as the reference fallback.
 
 ## Highlights
 
 - **Patch live in the browser** — network editor with a create-operator dialog (`Tab` / double-click: family tabs, searchable grid), wire dragging, container hierarchy with in/out tunneling, **real-time previews on every node** (one GPU compositor paints the viewer and all visible thumbnails at full frame rate — no CPU readbacks), and a parameter panel with sliders, menus, and per-parameter **expressions** (`op('lfo1')['chan1']`, `parent().par.speed`, `time.seconds * 0.2`, …).
 - **Real-time GPU engine** — pull-based cook loop; TOPs run as GPU passes, CHOPs drive parameters; feedback loops, separable blur, 6-mode compositing, displacement, edge detection, webcam/video/image input.
 - **Two GPU backends at parity** — WebGL2 (default, universal) and WebGPU (`?backend=webgpu`), both speaking one backend-agnostic pass contract; WebGPU's compute path is reserved for the upcoming particle family.
-- **TouchDesigner import** — supported operators run live, everything else becomes a faithful stub preserving names, wires, layout, parameters, and Python code, with an honest report. Verified on real production projects.
+- **TouchDesigner import** — drop a `.toe`/`.tox` and it is **decoded natively in the browser**, no TD install needed (research use only — see below); supported operators run live, everything else becomes a faithful stub preserving names, wires, layout, parameters, and Python code, with an honest report. Verified byte for byte against `toeexpand` on 125 production projects.
 - **Own versioned format** — lossless `.webtoe.json` save/load with migration hooks.
 
 | Feedback trails (mouse-driven) | CHOP scope & channels |
@@ -32,17 +32,21 @@ WebToe is an original engine and editor built from scratch for the web. It is no
 
 ![Import report dialog after importing a 213-node production project](docs/media/import-report.png)
 
-**Drop a `.toe` on the page and it opens.** No CLI step, no folder shuffling.
+**Drop a `.toe` on the page and it opens.** No install, no CLI step, no folder shuffling — the container is decoded right in your browser. [Try it with a raw 2022 project file](https://webtoe.openaudiovisual.com/?project=examples/toe/2022-fractals.toe) (saved by TouchDesigner 2021.16410).
+
+> **Native `.toe` decoding is provided for research purposes only.** It exists to study interoperability with project files you own, is not affiliated with or endorsed by Derivative Inc., and may break with any TouchDesigner release (Derivative has announced an official JSON project format; WebToe's `ProjectLoader` interface is ready for it). The bridge path below — your own TouchDesigner's `toeexpand` — stays the reference and the automatic fallback. Format notes and validation: **[docs/TOE-FORMAT.md](docs/TOE-FORMAT.md)**.
+
+Validated against the official `toeexpand` (TD 2025.33070) on **125 production project files** from 3 KB to 151 MB: identical file sets, byte for byte (553,230 files), in **17.7 s versus 266.5 s** for `toeexpand` — a 151 MB show file decodes in 4.2 s, a daily sketch in a few milliseconds. Where TouchDesigner has sibling operators whose names differ only in case, the native decoder keeps both; `toeexpand`, writing to a case-insensitive disk, merges them.
+
+**The reference path: your own TouchDesigner.** If native decoding fails, or you force it with `?toe=bridge`, the one step that needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
 
 ```bash
-npx webtoe        # serves the app locally and opens it — then just drag your .toe in
+npx webtoe        # serves the app locally with the bridge — then just drag your .toe in
 ```
-
-A `.toe` is a proprietary compressed container that no browser can decode (see [RESEARCH §1](docs/RESEARCH.md)). The one step that genuinely needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — therefore runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
 
 **No Node?** Every TouchDesigner install ships Python, so the same bridge is one stdlib-only file. Download [`bridge.py`](https://webtoe.openaudiovisual.com/bridge.py) (the guide modal links it), then `python3 bridge.py` (TD's bundled interpreter works too) and drop your `.toe` on the hosted page. Protocol-identical to `npx webtoe`.
 
-Already using the hosted app with Node? Run the bridge alone in a terminal and the hosted page will find it. With no bridge at all, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
+Already using the hosted app with Node? Run the bridge alone in a terminal and the hosted page will find it. If native decoding fails and no bridge is running, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
 
 ```bash
 # bridge only, for the hosted app at webtoe.openaudiovisual.com
@@ -64,10 +68,11 @@ What the importer recovers: node types and hierarchy, wires (including wires acr
 
 ### Tested, automatically
 
-`.toe` reading is covered by a two-layer automated suite built on an **original committed fixture** — a real binary `.toe` plus its canonical `toeexpand` expansion, authored for this repo and round-tripped through the official tools ([provenance](tests/fixtures/README.md)):
+`.toe` reading is covered by a three-layer automated suite built on an **original committed fixture** — a real binary `.toe` plus its canonical `toeexpand` expansion, authored for this repo and round-tripped through the official tools ([provenance](tests/fixtures/README.md)):
 
 1. a CI-safe layer asserts the full reconstructed graph — types, COMP-boundary and tunnel wires, parameter modes, translated expressions evaluated in the engine, honest stubs, report numbers, plus the sidecar container decoder;
-2. an integration layer (auto-skipped where TD isn't installed) expands the committed binary with the real `toeexpand` and runs the CLI and the bridge end-to-end — including a project whose filename is not English.
+2. the native decoder (CI-safe): the fixture decodes byte for byte to the committed expansion through both inflaters and imports to the identical graph; synthetic containers cover multi-segment archives, chunked kind-12 segments with records straddling chunks, chance segment magic in the ciphertext, and the recovery path;
+3. an integration layer (auto-skipped where TD isn't installed) expands the committed binary with the real `toeexpand` and runs the CLI and the bridge end-to-end — including a project whose filename is not English.
 
 ## Operator set (v1)
 
@@ -84,7 +89,7 @@ Plus per-family stub operators used by the importer. Expressions ship with `time
 
 ## Examples
 
-Ten bundled projects load from the toolbar and run out of the box. The flagship is **09 showcase** — 27 nodes exercising every family at once: a webcam layer through edge detection, a kaleidoscope COMP with in/out tunnels, a mouse-position source switch, noise displacement, hue-drifting feedback trails, and a full CHOP rig (lag, speed integrator, parameter reader, full math pipeline) driving it through eight live expressions. Newest: **10 3d lines** — the full 3D pipeline: skinned line ribbons and noise-scattered instanced spheres inside geometry COMPs, an orbiting look-at camera, lights, a render TOP, and a glow post chain. Also: five authored 2D patches — **hello noise** (expression-driven brightness), **feedback trails** (move your mouse over the viewer), **lfo garden** (additive ramp chains with hue drift), **webcam displace** (allow camera access; degrades gracefully without one), **chop playground** (select `merge1` to scope raw vs lagged channels) — and three **real 2022 TouchDesigner daily sketches imported through the `.toe` pipeline** (pseudo-voronoi, fractal feedback, and a mouse-interactive CHOP study; lightly adapted for the web, e.g. movie sources swapped for noise).
+Twelve bundled projects load from the toolbar and run out of the box — the last two, **11** and **12**, are raw `.toe` files saved by TouchDesigner 2021.16410, decoded natively the moment you pick them. The flagship is **09 showcase** — 27 nodes exercising every family at once: a webcam layer through edge detection, a kaleidoscope COMP with in/out tunnels, a mouse-position source switch, noise displacement, hue-drifting feedback trails, and a full CHOP rig (lag, speed integrator, parameter reader, full math pipeline) driving it through eight live expressions. Newest: **10 3d lines** — the full 3D pipeline: skinned line ribbons and noise-scattered instanced spheres inside geometry COMPs, an orbiting look-at camera, lights, a render TOP, and a glow post chain. Also: five authored 2D patches — **hello noise** (expression-driven brightness), **feedback trails** (move your mouse over the viewer), **lfo garden** (additive ramp chains with hue drift), **webcam displace** (allow camera access; degrades gracefully without one), **chop playground** (select `merge1` to scope raw vs lagged channels) — and three **real 2022 TouchDesigner daily sketches imported through the `.toe` pipeline** (pseudo-voronoi, fractal feedback, and a mouse-interactive CHOP study; lightly adapted for the web, e.g. movie sources swapped for noise).
 
 ## Quick start (development)
 
@@ -105,7 +110,7 @@ npm workspaces with a strict downward dependency rule — `apps/web → editor �
 | `@webtoe/core` | graph model, pull-based cook engine, expression system, backend-agnostic GPU pass contract, versioned serialization, public `registerOp` plugin API |
 | `@webtoe/ops` | operator definitions; CHOP kernels behind a WASM-ready interface; TOP shaders authored per backend (GLSL **and** WGSL, hand-written) |
 | `@webtoe/gpu` | WebGL2 backend + WebGPU backend (parity), texture pools, ping-pong feedback, async readback thumbnails |
-| `@webtoe/io` | `.webtoe.json` + the `toeexpand`-output importer behind a `ProjectLoader` adapter (Derivative's announced official JSON format slots in beside it) |
+| `@webtoe/io` | `.webtoe.json`, the native `.toe` container decoder (research use only), and the expansion importer behind a `ProjectLoader` adapter (Derivative's announced official JSON format slots in beside it) |
 | `@webtoe/editor` | embeddable, framework-free editor — `mountEditor(el, opts)` |
 | `@webtoe/cli` | `toe-convert.mjs` |
 | `webtoe-bridge` | loopback service: serves the app and runs your own `toeexpand` so `.toe` is a plain drop target |
@@ -136,7 +141,7 @@ Browsers can't join NDI networks directly, so WebToe pairs two pieces: a tiny lo
 
 ## Disclaimer
 
-WebToe is an independent open-source project, **not affiliated with or endorsed by Derivative Inc.** TouchDesigner is a trademark of Derivative Inc. WebToe contains no Derivative code, binaries, or assets; it reads the text expansion of project files that users generate locally with their own licensed TouchDesigner installation, for interoperability. All engine code, shaders, and UI design in this repository are original work.
+WebToe is an independent open-source project, **not affiliated with or endorsed by Derivative Inc.** TouchDesigner is a trademark of Derivative Inc. WebToe contains no Derivative code, binaries, or assets. It opens project files for interoperability: either by decoding the container natively — **provided for research purposes only** ([docs/TOE-FORMAT.md](docs/TOE-FORMAT.md)) — or from the text expansion users generate locally with their own licensed TouchDesigner installation. All engine code, shaders, and UI design in this repository are original work.
 
 ## License
 

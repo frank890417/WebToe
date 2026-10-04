@@ -17,6 +17,8 @@
 
 ## 1. The `.toe` container format (binary)
 
+> **Superseded (2026-10-04):** the container is now decoded natively — TEA-ECB over stock zlib, length-framed segments — and validated byte for byte against `toeexpand` on 125 production files. See [TOE-FORMAT.md](TOE-FORMAT.md) (research use only). The history below is kept as written.
+
 **Re-verified 2026-08-01** against a 16,562-file local corpus (previously: two samples). The 2026-06-11 model below the line was partly wrong and is corrected here.
 
 Per-byte-position entropy across 590 randomly sampled real `.toe` files:
