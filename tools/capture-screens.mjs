@@ -14,7 +14,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const BASE = process.env.WEBTOE_URL ?? 'http://localhost:8643/WebToe/';
+const BASE = process.env.WEBTOE_URL ?? 'http://localhost:8643/app/';
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'media');
 mkdirSync(OUT, { recursive: true });
 

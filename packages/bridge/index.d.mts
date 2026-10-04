@@ -3,6 +3,9 @@ import type { Server } from 'node:http';
 
 export const DEFAULT_PORT: number;
 
+/** Where the editor lives inside a built dist: '/app/' for current builds, '/' for old flat ones. */
+export function editorPath(dist: string | null): '/app/' | '/';
+
 export function createBridgeServer(opts?: {
   /** directory holding the built web app; auto-detected from a checkout or the npm tarball's public/ */
   appDist?: string | null;
