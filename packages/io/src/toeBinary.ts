@@ -158,16 +158,26 @@ export function teaDecryptWasm(u8: Uint8Array, k: ArrayLike<number> = TOE_TEA_KE
 
 /**
  * zlib inflate on the web platform. The TEA padding leaves up to 7 bytes after
- * the zlib stream, which DecompressionStream reports as an error after it has
- * produced the full output — so output followed by an error is accepted, and
- * completeness is judged by the record parser, not by the stream.
+ * the zlib stream, and DecompressionStream errors on them ("junk after end").
+ * An error resets the readable queue, discarding output not yet read — so if
+ * the junk arrives in the same write as the final output, that output is lost
+ * (large streams lose their tail). Hence: the bulk goes in one write, the last
+ * 8 bytes one per write. Backpressure holds each of those writes until every
+ * chunk before it has been read, so the junk byte errors an empty queue.
+ * Completeness is then judged by the caller (raw length / Adler-32).
  */
 export async function inflateWeb(data: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream('deflate');
   const writer = ds.writable.getWriter();
-  writer.write(data as Uint8Array<ArrayBuffer>).catch(() => {});
-  writer.close().catch(() => {});
   const reader = ds.readable.getReader();
+  const head = Math.max(0, data.length - 8);
+  const writing = (async () => {
+    try {
+      if (head) await writer.write(data.subarray(0, head) as Uint8Array<ArrayBuffer>);
+      for (let i = head; i < data.length; i++) await writer.write(data.subarray(i, i + 1) as Uint8Array<ArrayBuffer>);
+      await writer.close();
+    } catch { /* junk after the stream end, or a truncated stream — judged by the caller */ }
+  })();
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -180,6 +190,7 @@ export async function inflateWeb(data: Uint8Array): Promise<Uint8Array> {
   } catch (err) {
     if (!total) throw err;
   }
+  await writing;
   if (chunks.length === 1) return chunks[0];
   const out = new Uint8Array(total);
   let at = 0;

@@ -1,0 +1,197 @@
+// 網站字串，繁體中文（/zh/、/zh/docs/…）。結構必須與 en.mjs 逐鍵相同，
+// 否則 tools/site/build.mjs 拒絕建置。字串可含行內 HTML；程式碼、網址與順序放在 page.mjs。
+// {name} 建置時填入；{{TOE_NAME}} 留給 repo 擁有者填入驗證後的數字。
+
+export default {
+  meta: {
+    title: 'WebToe · 在瀏覽器裡跑的即時影像資料流引擎',
+    description: '像 TouchDesigner 一樣在瀏覽器裡接運算子：TOP、CHOP、SOP、MAT、COMP、DAT 跑在 WebGL2 與 WebGPU 上，每個參數都能寫表達式，還能匯入你現有的 .toe 專案。開源、MIT 授權、零執行期相依套件。',
+    ogDescription: 'TouchDesigner 式的節點接線，開一個瀏覽器分頁就能跑，也打得開你的 .toe。',
+    ogImageAlt: 'WebToe：在瀏覽器裡跑的即時影像資料流引擎。一張接好線的運算子網路。',
+    ld: '為即時影像設計的網頁原生節點式資料流引擎與編輯器：六大運算子家族（TOP、CHOP、SOP、MAT、COMP、DAT）接成網路，參數由表達式驅動，拉取式 cook 迴圈跑在 WebGL2 與 WebGPU 上，並可匯入 TouchDesigner 的 .toe 專案。MIT 授權，零執行期相依套件。',
+  },
+
+  ui: {
+    skip: '跳到主要內容',
+    navLabel: '網站',
+    nav: { toe: '匯入 .toe', how: '資料流', parity: '對齊度', docs: '文件' },
+    langLabel: '語言',
+    home: 'WebToe 首頁',
+    openEditor: '開啟編輯器',
+    copy: '複製',
+    copied: '已複製',
+  },
+
+  footer: {
+    disclaimer: '獨立的開源專案，與 Derivative Inc. 無隸屬關係，也未獲其背書。TouchDesigner 是 Derivative Inc. 的商標。WebToe 不含任何 Derivative 的程式碼、執行檔或素材。',
+    license: 'MIT 授權 · 由 <a href="https://cheyuwu.com">吳哲宇</a> 開發',
+    pages: '頁面',
+    home: '首頁',
+    editor: '編輯器',
+    docs: '文件',
+    machine: '機器可讀',
+  },
+
+  hero: {
+    sub: '在瀏覽器裡跑的即時影像資料流引擎',
+    lede: '運算子、連線、即時的 cook 迴圈，TouchDesigner 的工作方式，開一個瀏覽器分頁就能用。TOP 在 GPU 上算圖，CHOP 透過表達式驅動參數，SOP 與 MAT 餵給 3D 渲染器。把 <code>.toe</code> 拖進來，你的網路就打開了。',
+    ctaEditor: '開啟編輯器',
+    ctaDocs: '閱讀文件',
+    facts: 'MIT · 零執行期相依套件 · WebGL2 + WebGPU · {bundleKb} KB JavaScript',
+    netCaption: '這張圖就是範例 03 本身，直接從專案檔讀出來畫的：三條 ramp 鏈由 LFO 透過表達式（虛線）旋轉，疊加合成後再偏移色相。',
+    netOpen: '打開它',
+    legendLabel: '圖示說明',
+    legend: [
+      '<b>連線</b> 輸出接到輸入',
+      '<b>虛線</b> 表達式讀取的 CHOP 通道',
+      '<b>ƒ</b> 由表達式驅動的參數',
+      '<b>●</b> 顯示旗標',
+    ],
+    shotAlt: 'WebToe 編輯器正在執行範例 03 lfo garden：ramp、transform、composite、hsv adjust 運算子組成的網路，每個節點都有即時預覽，輸出顯示在檢視器。',
+    shotCaption: '/app/ 的編輯器，以 WebGL2 執行同一個 patch。TOP 節點即時預覽：每一格畫面由同一個 GPU 合成器畫出檢視器和所有可見的縮圖。',
+  },
+
+  shots: {
+    title: '編輯器裡',
+    items: [
+      { title: '3D 管線', text: '範例 10：Geometry COMP 裡的 SOP 緞帶與 instanced 球體，加上攝影機、兩盞燈、Render TOP 與光暈處理。輸出畫在網路背後，和 TouchDesigner 一樣。', alt: '範例 10 3d lines：geometry、camera、light、render、blur、composite 節點，背後是渲染出的線條緞帶與橘色球體。' },
+      { title: '所有家族一次用上', text: '範例 09：27 個節點、帶 in/out 通道的萬花筒 COMP，以及透過即時表達式驅動整個 patch 的 CHOP 控制系統。', alt: '範例 09 showcase：TOP、CHOP、COMP、DAT 節點組成的密集網路，檢視器顯示合成後的輸出。' },
+      { title: '回授', text: 'feedback TOP 交回上一格畫面，再用逐漸變暗的 level，把滑鼠移動變成殘影。', alt: '範例 02 feedback trails：rectangle、transform、composite、blur、feedback、level 接成迴圈。' },
+      { title: 'CHOP 示波', text: '選取一個 CHOP，檢視器就畫出它的通道：這裡是原始加總和延遲後的版本。', alt: '範例 05 chop playground：LFO、noise、math、lag、merge 等 CHOP，選取 merge 後檢視器畫出通道。' },
+      { title: '新增運算子', text: '按 Tab 或雙擊開啟面板：每個家族一個分頁，搜尋跨所有家族。', alt: '新增運算子對話框，在一個小 noise patch 上方，以可搜尋的格狀清單列出 TOP 運算子。' },
+      { title: 'WebGPU', text: '同一個專案在 <code>?backend=webgpu</code> 上執行。每個 2D TOP 都有手寫的 GLSL 與 WGSL。', alt: '範例 03 在 WebGPU 後端上執行。' },
+    ],
+  },
+
+  toe: {
+    eyebrow: '01 · 匯入',
+    title: '拖進 .toe，就打開了。',
+    lede: '把 TouchDesigner 專案拖進編輯器，它就變成一張即時運作的 WebToe 網路。支援的運算子會直接跑；其他的保留成佔位節點（stub），名稱、連線、參數、程式碼都留著，匯入報告會清楚列出各有多少。',
+    nativeTitle: '在瀏覽器裡解碼',
+    nativeText: 'WebToe 直接讀取二進位的 <code>.toe</code> / <code>.tox</code> 容器：不需要安裝 TouchDesigner，不需要橋接程式，檔案也不會離開你的電腦。',
+    nativeStats: [
+      { label: '在瀏覽器裡解碼一個 20 MB 演出檔（33,923 個檔案）', value: '0.35 s' },
+      { label: '與 TouchDesigner 官方 <code>toeexpand</code> 輸出逐位元組一致的正式專案檔', value: '125 / 125' },
+    ],
+    research: '原生 .toe 解碼僅供研究用途。',
+    fallbackTitle: '備援：橋接程式',
+    fallbackText: '本機橋接程式在 127.0.0.1 上執行你自己安裝的 TouchDesigner 所附的 <code>toeexpand</code>，再把展開結果交給頁面。一行指令；或用 TouchDesigner 內附的 Python 執行 <a href="{root}bridge.py"><code>bridge.py</code></a>。',
+    fallbackNote: '預設只綁定 127.0.0.1，不附帶任何 Derivative 的東西，處理完就刪除上傳的檔案。',
+    measuredTitle: '在真實演出檔上實測',
+    measuredNote: '一個 20 MB 的正式演出專案，直接拖進頁面、在瀏覽器裡原生解碼。2026-10-04 在 MacBook Pro（M4 Max）的 Chrome 實測。八月時走橋接程式，同等大小的檔案要 8.0 秒。',
+    measured: [
+      { label: '匯入的節點', value: '14,656' },
+      { label: '可執行（10,343 個節點）', value: '71%' },
+      { label: '翻譯完成的 Python 表達式', value: '2,246' },
+      { label: '從容器解出的檔案', value: '33,923' },
+      { label: '從拖放到網路開始運作', value: '0.54 s' },
+    ],
+    shotAlt: 'TouchDesigner 匯入報告：213 個節點，71 個可執行，142 個保留為佔位節點，結構、連線與版面都保留；9 個表達式完成翻譯，14 個保持停用。',
+    shotCaption: '一個 213 節點正式專案在 v1.1 時的匯入報告：71 個可執行。同一個檔案在第一輪演進後達到 88 個。',
+    recovers: '還原的內容：節點類型與階層、跨 COMP 邊界與穿過 in/out 通道的連線、參數值與模式、DAT 文字與表格、網路版面，以及即時的 Python 表達式。能忠實翻譯的會翻成 WebToe 表達式（<code>absTime.seconds*0.2</code> → <code>time.seconds*0.2</code>），其餘保持停用。匯入的 Python 永遠不會被執行。',
+    docsLink: '匯入 TouchDesigner 專案',
+  },
+
+  how: {
+    eyebrow: '02 · 資料流',
+    title: '運算子、連線、表達式，一個 cook 迴圈。',
+    lede: '網路就是一群接在一起的運算子。每一格畫面，引擎從輸出往回拉，相依的節點只算一次，結果在這一格內快取。回授（feedback）是唯一刻意保留的循環：它讀的是上一格。',
+    families: [
+      'GPU 影像運算子：產生器、濾鏡、合成、回授、lookup、render、媒體輸入與 NDI 收發。',
+      '通道：LFO、noise、math、lag、speed、mouse in、SOP to。驅動參數的數值都從這裡來。',
+      '型別陣列幾何：基本形體、copy、skin、noise、twist，以及 COMP 網路用的 in/out。',
+      '場景渲染器的材質：constant、lit（phong 與 pbr）、line、point sprite、wireframe。',
+      '帶 in/out 通道的容器，以及 3D 物件：geometry（含 instancing）、camera、燈光。',
+      '運算子可讀取的文字與表格：ramp 可以從表格讀色彩鍵值。',
+    ],
+    familiesNote: '共 {total} 種運算子，建置時直接從引擎的註冊表計算。',
+    opsLink: '所有運算子',
+    exprTitle: '每個參數都可以是表達式',
+    exprText: '表達式是 JavaScript，在固定的作用域裡求值：<code>time</code>、<code>me</code>、<code>op()</code>、<code>parent()</code>、<code>ext()</code>，加上數學函式庫（<code>sin</code>、<code>clamp</code>、<code>fract</code>、<code>lerp</code>、<code>rand</code>…）。可以即時讀取通道和其他參數，並有循環保護。',
+    exprLink: '表達式',
+  },
+
+  parity: {
+    eyebrow: '03 · 對齊度',
+    title: '用真實的 TouchDesigner 作品來量。',
+    lede: '「完整」由資料定義，不靠功能清單：60 個來自每日生成藝術創作的真實 TouchDesigner 專案（28,698 個節點，2022–2026），用官方 <code>toeexpand</code> 展開，依運算子類型計數。公開的只有彙總數字。',
+    chartTitle: '語料庫中能以 WebToe 運算子執行的節點比例',
+    stages: [
+      { name: 'v1', text: '第一個版本' },
+      { name: '第一輪', text: '表達式 v2、路由類 TOP、DAT 表格' },
+      { name: 'R3', text: '3D 管線：SOP、MAT、geometry、camera、render' },
+    ],
+    chartNote: '每一步都在同樣的 28,698 個節點上重新量測（docs/ROADMAP.md）。其餘節點匯入為佔位節點：結構、連線、版面與程式碼都保留。',
+    facts: [
+      { label: '一個 213 節點參考專案在同樣三步的可執行節點數', value: '56 → 71 → 88' },
+      { label: 'TouchDesigner 官方運算子總數，分屬 7 個家族', value: '~675' },
+      { label: 'WebToe 目前提供的運算子種類', value: '{total}' },
+      { label: '一個 2025 年大量使用 POP 的專案，在 POP 對應到 SOP 實作後的可執行比例', value: '43% → 73%' },
+    ],
+    nextTitle: '接下來，依序是',
+    next: [
+      '多樣本 CHOP 與時間切片：音訊、trail、resample、wave 的前提。',
+      'GLSL TOP：把 TouchDesigner 注入的著色器約定轉接到 WebGL2。',
+      '在 WebGPU compute 上實作 POP：這正是第二個後端存在的理由。',
+    ],
+    boundary: 'Python 是永久的邊界。匯入的 Python 會保留、會顯示，但不會執行；規劃中的替代方案是需要手動啟用的 JavaScript 回呼 DAT。',
+    link: 'TouchDesigner 對齊藍圖',
+  },
+
+  engine: {
+    eyebrow: '04 · 引擎',
+    title: '小、明確、沒有相依套件。',
+    lede: '為網頁從零寫成的原創引擎，不是移植。它在瀏覽器的 GPU 上實作同一套工作方式：運算子家族、接線網路、表達式驅動的參數、即時 cook 迴圈。',
+    facts: [
+      { title: '零執行期相依套件', text: '整個 app 只有引擎、編輯器和著色器：{bundleKb} KB JavaScript，gzip 後 {bundleGz} KB。' },
+      { title: '兩個 GPU 後端', text: '預設 WebGL2，加上 <code>?backend=webgpu</code> 就切到 WebGPU，兩者共用一份與後端無關的 pass 約定。2D 已對齊；3D 場景 pass 目前只有 WebGL2。' },
+      { title: '一條相依規則', text: 'import 只往下走，<code>core</code> 不 import 任何東西。運算子透過公開的 <code>registerOp</code> API 註冊。' },
+      { title: '可嵌入', text: '<code>mountEditor(el, options)</code> 把不依賴框架的編輯器放進任何頁面。宿主頁面可以透過 <code>postMessage</code> 載入專案、驅動表達式。' },
+      { title: '有版本的檔案格式', text: '<code>.webtoe.json</code> 帶有版本號與遷移鏈；不認得的運算子類型會降級成同家族的佔位節點，而不是讀取失敗。' },
+      { title: '值得才用 WASM', text: 'NDI 的像素轉換跑在 1 KB 的 WebAssembly 核心上，並有 JavaScript 備援。只有實測確實更快才採用 WASM。' },
+    ],
+    depsLabel: '套件相依圖：apps/web 依賴 editor；editor 依賴 ops、gpu、io；全部依賴 core。',
+    depsCaption: 'npm workspaces，import 只往一個方向流。',
+    archLink: '架構',
+  },
+
+  oav: {
+    eyebrow: '05 · 引擎 ↔ 演出',
+    title: 'WebToe 是引擎，open-audiovisual 是演出。',
+    p1: '<a href="https://openaudiovisual.com/">open-audiovisual</a> 是姊妹專案：一套網頁原生的影音演出框架，有 MIDI、和弦與姿態輸入、訊號到參數的對應層、含場景與 cue 的時間軸，以及後台監看。',
+    p2: '它的 <code>@openav/world-webtoe</code> 轉接器把這個編輯器嵌進 iframe，每一格讀取演出解算後的參數，把有變動的送進 patch。在網路裡它們就是普通數字：任何表達式寫 <code>ext(\'energy\')</code> 就能讀。',
+    docsLink: '嵌入與外部控制',
+  },
+
+  start: {
+    eyebrow: '06 · 開始',
+    title: '三種開始方式。',
+    browserTitle: '在瀏覽器裡',
+    browserText: '什麼都不用裝。打開編輯器，從工具列載入十個範例之一，或把專案檔拖到頁面上。',
+    localTitle: '在你的電腦上',
+    localText: '在 127.0.0.1 上啟動編輯器與匯入橋接程式，並自動開啟。需要 Node 20 以上。',
+    sourceTitle: '從原始碼',
+    sourceText: '整個 monorepo：引擎、運算子、兩個 GPU 後端、編輯器、匯入器、橋接程式。<code>npm run check</code> 會跑型別檢查與測試。',
+    docsTitle: '文件',
+  },
+
+  docs: {
+    title: '文件',
+    navLabel: '文件',
+    menu: '文件目錄',
+    toc: '本頁內容',
+    prev: '上一頁',
+    next: '下一頁',
+    pagerLabel: '上一頁與下一頁',
+    edit: '在 GitHub 上編輯這一頁',
+    groups: { start: '開始', import: '匯入', build: '建構', integrate: '整合', engine: '引擎' },
+    opsFamily: '家族',
+    opsCount: '數量',
+    opsList: '運算子',
+    opsTotal: '合計',
+    parityOfficial: '官方',
+    parityNote: '備註',
+    parityPop: '匯入的 POP 透過 SOP 實作執行幾何部分',
+    opsSource: '建置時直接從 <code>packages/ops/src</code> 的運算子註冊表產生，所以這張表永遠與程式碼一致。匯入器用於未對應類型的各家族佔位節點不計入。',
+  },
+};

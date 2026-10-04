@@ -10,7 +10,7 @@
 
 ![WebToe editor running the lfo-garden example](docs/media/hero-lfo-garden.png)
 
-WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the whole app is ~90 KB of JS), and it opens real TouchDesigner projects — a dropped `.toe` is decoded right in the browser (research preview), with your own TD installation's `toeexpand` as the reference fallback.
+WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the editor is about 200 KB of JS, 60 KB gzipped), and it opens real TouchDesigner projects — a dropped `.toe` is decoded right in the browser (research preview), with your own TD installation's `toeexpand` as the reference fallback.
 
 ## Highlights
 

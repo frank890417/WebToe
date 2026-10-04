@@ -8,7 +8,7 @@ beyond what a TD user already has:
             "/Applications/TouchDesigner.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3")
   Windows:  "C:\\Program Files\\Derivative\\TouchDesigner\\bin\\python.exe" bridge.py
 
-Then open https://frank890417.github.io/WebToe/ and drop a .toe on the page.
+Then open https://webtoe.openaudiovisual.com/app/ and drop a .toe on the page.
 
 Protocol-identical to the Node bridge (`npx webtoe`): GET /health, POST
 /expand?name=…, same JSON shape, same CORS + Private-Network-Access headers.
@@ -221,7 +221,7 @@ def main():
     loopback = args.host in ("127.0.0.1", "localhost", "::1")
     print(f"webtoe bridge (python) {VERSION} → http://{'127.0.0.1' if loopback else args.host}:{args.port}")
     print(f"  toeexpand: {tool}" if tool else "  toeexpand: NOT FOUND — install TouchDesigner, or pass --toeexpand <path>")
-    print("  now open https://frank890417.github.io/WebToe/ and drop a .toe on the page")
+    print("  now open https://webtoe.openaudiovisual.com/app/ and drop a .toe on the page")
     if not loopback and not args.token:
         print("  ⚠️  bound beyond loopback with NO --token: anyone who can reach this port can run")
         print("     your toeexpand on files they upload.")

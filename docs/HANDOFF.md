@@ -6,7 +6,7 @@
 
 ## 0. Resume protocol (do this first, every session)
 
-1. `cd webtoe && npm install && npm run dev` → confirm http://localhost:8643/WebToe/ boots and the starter patch animates **before touching code**.
+1. `cd webtoe && npm install && npm run dev` → confirm http://localhost:8643/app/ boots and the starter patch animates **before touching code**.
 2. `npm run check` → typecheck + full test suite must be green at start and before every push.
 3. Read `WORKLOG.md → ## NEXT`. Do that next unless the user redirects. Append a WORKLOG entry (what/evidence/NEXT) with every commit. Commit per milestone, push to `main`, watch CI.
 4. The user reads progress through WORKLOG entries, commit messages, and chat reports at milestone boundaries. Report measured numbers, not adjectives.

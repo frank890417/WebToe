@@ -2,8 +2,8 @@
 /**
  * webtoe-bridge — the local service that makes `.toe` a first-class drop target.
  *
- *   npx webtoe            # serve the app + bridge, open a browser
- *   npx webtoe-bridge     # bridge only (for the hosted app at github.io)
+ *   npx webtoe            # serve the site + editor (/app/) + bridge, open the editor
+ *   npx webtoe --no-open  # bridge only (for the hosted editor at webtoe.openaudiovisual.com)
  *
  * Why this exists: a `.toe` is a proprietary compressed container (re-verified
  * 2026-08-01, docs/RESEARCH.md §1) — no browser can decode it. The official
@@ -18,7 +18,7 @@
 import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join, normalize, resolve } from 'node:path';
+import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expandToe, findToeexpand, toeexpandBuild } from './expand.mjs';
 
@@ -35,10 +35,19 @@ const MIME = {
   '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
 };
 
-/** The built web app, when the bridge runs from a checkout. */
+/**
+ * The built site, when the bridge runs from a checkout or from the npm tarball.
+ * Current builds put the editor in app/ and the homepage + docs at the root;
+ * older builds had the editor itself at the root (index.html only).
+ */
 function findAppDist(explicit) {
   const candidates = [explicit, join(HERE, '../../apps/web/dist'), join(HERE, 'public')].filter(Boolean);
-  return candidates.find((c) => existsSync(join(c, 'index.html'))) ?? null;
+  return candidates.find((c) => existsSync(join(c, 'app', 'index.html')) || existsSync(join(c, 'index.html'))) ?? null;
+}
+
+/** Where the editor lives inside a dist: '/app/' for current builds, '/' for old flat ones. */
+export function editorPath(dist) {
+  return dist && existsSync(join(dist, 'app', 'index.html')) ? '/app/' : '/';
 }
 
 /**
@@ -81,13 +90,21 @@ function receiveToFile(req, name) {
   });
 }
 
-function serveStatic(res, distDir, urlPath) {
-  // strip the app's base path, then contain the result inside distDir
-  const rel = urlPath.replace(/^\/WebToe\/?/, '') || 'index.html';
+function serveStatic(res, distDir, url) {
+  let rel;
+  try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400); res.end('bad request'); return; }
+  // contain the result inside distDir
   const target = normalize(join(distDir, rel));
-  if (!target.startsWith(resolve(distDir))) { res.writeHead(403); res.end('forbidden'); return; }
-  const file = existsSync(target) && statSync(target).isDirectory() ? join(target, 'index.html') : target;
-  if (!existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
+  if (target !== resolve(distDir) && !target.startsWith(resolve(distDir) + sep)) { res.writeHead(403); res.end('forbidden'); return; }
+  const isDir = existsSync(target) && statSync(target).isDirectory();
+  // /app → /app/ so the page's relative URLs (examples/, wasm/) resolve inside it
+  if (isDir && !url.pathname.endsWith('/')) { res.writeHead(301, { Location: url.pathname + '/' + url.search }); res.end(); return; }
+  const file = isDir ? join(target, 'index.html') : target;
+  if (!existsSync(file)) {
+    const notFound = join(distDir, '404.html');
+    if (existsSync(notFound)) { res.writeHead(404, { 'Content-Type': MIME['.html'] }); createReadStream(notFound).pipe(res); return; }
+    res.writeHead(404); res.end('not found'); return;
+  }
   res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
   createReadStream(file).pipe(res);
 }
@@ -146,8 +163,12 @@ export function createBridgeServer({ appDist = null, toeexpand = null, token = n
     }
 
     if (req.method === 'GET' && dist) {
-      if (url.pathname === '/') { res.writeHead(302, { Location: '/WebToe/' }); res.end(); return; }
-      serveStatic(res, dist, url.pathname);
+      const app = editorPath(dist);
+      // legacy local URLs (the app used to be served under /WebToe/)
+      if (/^\/WebToe(\/|$)/.test(url.pathname)) {
+        res.writeHead(301, { Location: app + url.pathname.replace(/^\/WebToe\/?/, '') + url.search }); res.end(); return;
+      }
+      serveStatic(res, dist, url);
       return;
     }
 
@@ -191,7 +212,7 @@ if (isMain() || process.env.WEBTOE_FORCE_MAIN === '1') {
       console.log('  ⚠️  bound beyond loopback with NO --token: anyone who can reach this port can run');
       console.log('     your toeexpand on files they upload. Set --token (see docs/PUBLISH.md §deploy).');
     }
-    if (shouldOpen && dist && loopback) openBrowser(`http://127.0.0.1:${port}/WebToe/`);
+    if (shouldOpen && dist && loopback) openBrowser(`http://127.0.0.1:${port}${editorPath(dist)}`);
   });
   server.on('error', (e) => {
     console.error(e.code === 'EADDRINUSE' ? `port ${port} is busy — another bridge is probably already running` : e.message);

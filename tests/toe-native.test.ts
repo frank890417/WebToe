@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import zlib from 'node:zlib';
 import { registerAllOps } from '@webtoe/ops';
 import {
-  TOE_TEA_KEY, assessToeExpansion, decodeToeContainer, isToeContainer, teaDecryptJS, teaDecryptWasm,
+  TOE_TEA_KEY, assessToeExpansion, decodeToeContainer, inflateWeb, isToeContainer, teaDecryptJS, teaDecryptWasm,
   toImportFiles, toedirLoader,
 } from '@webtoe/io';
 import { teaEncryptJS } from '../packages/io/src/toeBinary';
@@ -171,6 +171,22 @@ describe('native .toe decoding', () => {
     const rec = await decodeAll(cat(seg12(blob, 40_000, true), seg10(tail, 6, true)));
     expect(rec.recovered).toBe(2);
     expect([...rec.files]).toEqual([...res.files]);
+  });
+
+  it('web inflate keeps the whole output of a large stream followed by padding junk', async () => {
+    // DecompressionStream errors on the junk after the stream end, and in Chrome that error
+    // discards output not yet read — large streams lost their tail in the browser. Node's
+    // implementation keeps the output either way, so this checks completeness here; the
+    // browser behaviour was verified on real 20 MB / 151 MB show files in Chrome.
+    const raw = new Uint8Array(6_000_000);
+    for (let i = 0; i < raw.length; i++) raw[i] = (i % 251) ^ ((i >> 10) & 7);
+    const z = new Uint8Array(zlib.deflateSync(raw));
+    const padded = new Uint8Array(z.length + 5);
+    padded.set(z);
+    padded.set([9, 9, 9, 9, 9], z.length);
+    const out = await inflateWeb(padded);
+    expect(out.length).toBe(raw.length);
+    expect(Buffer.from(out.subarray(raw.length - 64)).equals(Buffer.from(raw.subarray(raw.length - 64)))).toBe(true);
   });
 
   it('rejects files that are not TouchDesigner containers', async () => {

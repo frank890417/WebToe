@@ -4,7 +4,7 @@
  *
  * bridge.py exists for TouchDesigner users without Node: every TD install
  * ships a Python interpreter, so the single stdlib-only file is the
- * zero-extra-install path. It is served from the hosted app at /WebToe/bridge.py.
+ * zero-extra-install path. It is served from the site root at /bridge.py.
  *
  * Auto-skips when no python3 is on PATH (the file itself targets 3.8+ and,
  * on user machines, TD's bundled 3.11 — verified by hand 2026-08-01).
