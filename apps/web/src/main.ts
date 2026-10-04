@@ -25,6 +25,8 @@ const editorPromise = mountEditor(app, {
     { name: '08 sketch: chop study (2022, imported)', url: `${base}examples/08-sketch-chop-study.webtoe.json` },
     { name: '09 showcase (camera + everything)', url: `${base}examples/09-showcase.webtoe.json` },
     { name: '10 3d lines (SOPs + render)', url: `${base}examples/10-3d-lines.webtoe.json` },
+    { name: '11 raw .toe: pseudo voronoi (TD 2021 file, decoded in-browser)', url: `${base}examples/toe/2022-pseudo-voronoi.toe` },
+    { name: '12 raw .toe: fractals (TD 2021 file, decoded in-browser)', url: `${base}examples/toe/2022-fractals.toe` },
   ],
 });
 
@@ -49,7 +51,8 @@ window.addEventListener('message', (e: MessageEvent) => {
   }
 });
 
-// ?project=<url> — load a project straight from a link (CORS permitting)
+// ?project=<url> — load a project straight from a link (CORS permitting);
+// a .toe/.tox URL is decoded natively, e.g. ?project=examples/toe/2022-fractals.toe
 const projectUrl = new URLSearchParams(location.search).get('project');
 if (projectUrl) {
   void editorPromise.then((ed) => ed.loadUrl(projectUrl));

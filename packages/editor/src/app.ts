@@ -1,8 +1,9 @@
 import { Engine, graphFromJSON, type Graph, type ImportReport, type NodeInst, VERSION } from '@webtoe/core';
 import { createBackend } from '@webtoe/gpu';
 import {
-  DEFAULT_BRIDGE_URL, expandViaBridge, importFilesFromFileList, loadProjectFile, loadProjectUrl,
-  probeBridge, saveProjectFile, toedirLoader, type BridgeInfo, type ImportFile,
+  DEFAULT_BRIDGE_URL, assessToeExpansion, decodeToeContainer, expandViaBridge, importFilesFromFileList,
+  isToeContainer, loadProjectFile, loadProjectUrl, probeBridge, saveProjectFile, toImportFiles,
+  toedirLoader, type BridgeInfo, type ImportFile,
 } from '@webtoe/io';
 import { injectStyles } from './style';
 import { NetworkView } from './network';
@@ -97,7 +98,7 @@ export class EditorApp {
       if (!examples.value) return;
       const name = examples.options[examples.selectedIndex].text;
       try {
-        this.adoptGraph(await loadProjectUrl(examples.value), name);
+        await this.loadUrl(examples.value, name);
       } catch (e) {
         this.toast(`example failed: ${(e as Error).message}`);
       }
@@ -181,8 +182,17 @@ export class EditorApp {
     this.loop();
   }
 
-  /** Load a project from a URL and adopt it (public API for hosts/bridges). */
+  /** Load a project from a URL and adopt it (public API for hosts/bridges).
+   *  A `.toe`/`.tox` URL is fetched and opened exactly like a dropped file. */
   async loadUrl(url: string, name = 'project'): Promise<void> {
+    const path = url.split(/[?#]/)[0];
+    if (/\.(toe|tox)$/i.test(path)) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`fetch ${path}: HTTP ${res.status}`);
+      const fileName = decodeURIComponent(path.split('/').pop() || 'project.toe');
+      await this.openToeFile(new File([await res.arrayBuffer()], fileName));
+      return;
+    }
     this.adoptGraph(await loadProjectUrl(url), name);
   }
 
@@ -314,16 +324,40 @@ export class EditorApp {
   /**
    * Open a raw `.toe`/`.tox` with no steps asked of the user.
    *
-   * The container is proprietary and compressed, so the one operation only a
-   * TouchDesigner install can perform (`toeexpand`) is delegated to the local
-   * bridge. When the bridge is there this is a plain drop → graph. When it is
-   * not, the guide takes over and the app keeps every previous path working.
+   * First choice: decode the container natively in the browser (TEA + zlib —
+   * docs/TOE-FORMAT.md; research use only). No install, no network. If that
+   * fails or the result does not look like a TouchDesigner expansion, fall back
+   * to the reference path: the local bridge running the user's own `toeexpand`.
+   * `?toe=bridge` skips the native decoder (useful for side-by-side checks).
    */
   private async openToeFile(file: File): Promise<void> {
     const name = file.name.replace(/\.(toe|tox)$/i, '');
+    let nativeProblem: string | undefined;
+    if (new URLSearchParams(location.search).get('toe') !== 'bridge') {
+      const done = this.stickyToast(`decoding ${file.name} in your browser…`);
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        if (!isToeContainer(bytes)) throw new Error('not a TouchDesigner container');
+        const res = await decodeToeContainer(bytes);
+        const problem = assessToeExpansion([...res.files.keys()]);
+        if (problem) throw new Error(problem);
+        const size = file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1048576).toFixed(1)} MB`;
+        await this.importExpansion(toImportFiles(res.files), name, [
+          `decoded natively in your browser: ${size} → ${res.files.size} files in ${res.ms} ms`
+            + ` (${res.segments} segment${res.segments === 1 ? '' : 's'}, TEA ${res.tea}) — no TouchDesigner, no bridge`,
+          'native .toe decoding is a research preview; ?toe=bridge uses your own toeexpand instead',
+        ]);
+        return;
+      } catch (e) {
+        nativeProblem = `in-browser decoder: ${(e as Error).message}`;
+      } finally {
+        done();
+      }
+    }
+
     if (this.bridge === null) this.bridge = (await probeBridge()) ?? false;
     const info = this.bridge;
-    if (!info) { this.showToeGuide(file.name); return; }
+    if (!info) { this.showToeGuide(file.name, nativeProblem); return; }
     if (!info.toeexpand) {
       this.showToeGuide(file.name, 'the bridge is running but found no TouchDesigner install on this machine.');
       return;
@@ -333,6 +367,7 @@ export class EditorApp {
     try {
       const exp = await expandViaBridge(file, info);
       const notes = [`expanded locally in ${(exp.ms / 1000).toFixed(1)}s via ${info.tdBuild ?? 'toeexpand'}`];
+      if (nativeProblem) notes.push(`fell back from the ${nativeProblem}`);
       if (exp.skipped.length) notes.push(`${exp.skipped.length} binary/oversized sidecar file(s) skipped`);
       await this.importExpansion(exp.files, name, notes);
     } catch (e) {
@@ -345,7 +380,7 @@ export class EditorApp {
   }
 
   /** Drop targets: .webtoe.json loads, a .toe.dir folder imports, and a raw
-   *  .toe goes through the local bridge (guide only when it is unavailable). */
+   *  .toe decodes natively (bridge, then guide, only when that fails). */
   private bindDropIntake(root: HTMLElement): void {
     root.addEventListener('dragover', (e) => e.preventDefault());
     root.addEventListener('drop', async (e) => {
@@ -374,13 +409,11 @@ export class EditorApp {
   }
 
   /**
-   * Shown only when the automatic path is unavailable.
-   *
-   * Honest raw-.toe story: the binary is a proprietary compressed container
-   * (re-verified 2026-08-01 — docs/RESEARCH.md §1), so the one step that needs
-   * a TouchDesigner install has to happen outside the browser. The primary
-   * answer is one command that makes it permanent; the manual `toeexpand`
-   * route stays as the fallback for anyone who cannot run Node.
+   * Shown only when both automatic paths are unavailable: the in-browser
+   * decoder could not read the file (unknown container version, damaged file)
+   * and no bridge is running. The reference path — TouchDesigner's own
+   * `toeexpand` via the bridge — is one command away; the manual route stays
+   * for anyone who cannot run Node.
    *
    * While this modal is open it keeps probing, so starting the bridge in a
    * terminal makes the dialog continue on its own — no re-drop needed.
@@ -395,8 +428,8 @@ export class EditorApp {
     box.innerHTML = `
       <div style="font-weight:700;color:#fff;margin-bottom:8px;">open ${escapeHtml(fileName)}</div>
       ${problem ? `<div style="color:#e0a06a;margin-bottom:8px;">${escapeHtml(problem)}</div>` : ''}
-      <div><code>.toe</code> is a proprietary compressed binary — no browser can decode it. The one
-      step that needs TouchDesigner runs on your machine, and once this is running it happens by
+      <div>WebToe's in-browser decoder could not open this file. The reference path uses
+      TouchDesigner's own <code>toeexpand</code> on your machine — once this is running it happens by
       itself every time you drop a file.</div>
       <pre data-cmd style="background:#101013;padding:8px 10px;border-radius:6px;overflow:auto;cursor:pointer;margin:10px 0 4px;" title="click to copy">npx webtoe</pre>
       <div data-watch style="color:#9a9aa3;">waiting for the bridge on ${escapeHtml(DEFAULT_BRIDGE_URL)}… leave this open, it continues on its own.</div>

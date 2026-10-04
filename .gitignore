@@ -9,6 +9,8 @@ dist/
 *.toc
 # committed original test fixture (see tests/fixtures/README.md)
 !tests/fixtures/tiny.toe
+# demo containers for native decoding (the author's own 2022 sketches)
+!apps/web/public/examples/toe/*.toe
 packages/bridge/public/
 
 # reverse-engineering notes, oracle files, test records — never publish (哲宇 directive 2026-08-01)
