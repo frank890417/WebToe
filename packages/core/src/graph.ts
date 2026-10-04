@@ -5,6 +5,8 @@ import { getOp, defaultParams } from './registry';
 export class Graph {
   readonly root: NodeInst;
   readonly byId = new Map<number, NodeInst>();
+  /** project-level settings that travel with the file (e.g. cookRate) */
+  meta: Record<string, unknown> = {};
 
   constructor() {
     this.root = new NodeInst('__root__', '/', null);

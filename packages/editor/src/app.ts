@@ -230,6 +230,10 @@ export class EditorApp {
     // swap engine graph wholesale: release GPU resources of old nodes
     for (const n of this.engine.graph.byId.values()) this.engine.gpu?.releaseNode(n);
     (this.engine as { graph: Graph }).graph = graph;
+    // TouchDesigner cook rate travels with the project (default 60 Hz, TD's default)
+    const rate = Number(graph.meta.cookRate);
+    this.engine.cookRate = rate > 0 && rate <= 240 ? rate : 60;
+    graph.meta.cookRate = this.engine.cookRate;
     this.engine.liveRoots.clear();
     this.projName.value = name || 'untitled';
     this.network.setNetwork(graph.root);
@@ -579,7 +583,10 @@ export class EditorApp {
     if (f % 15 === 0) {
       this.network.updateBadges();
       this.params.tick();
-      this.hud.textContent = `v${VERSION} · ${gpu?.name ?? 'no gpu'} · ${this.engine.time.fps.toFixed(0)} fps`;
+      const skipped = this.engine.skippedSteps;
+      this.hud.textContent = `v${VERSION} · ${gpu?.name ?? 'no gpu'} · ${this.engine.time.fps.toFixed(0)} fps`
+        + ` · cook ${this.engine.cookRate} Hz${skipped ? ` · ${skipped} skipped` : ''}`;
+      this.hud.title = `cook step ≈ ${(this.engine.stepCost * 1000).toFixed(2)} ms (fitted; includes GPU time that lengthens frames)`;
     }
     this.rafId = requestAnimationFrame(this.loop);
   };

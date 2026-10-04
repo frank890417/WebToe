@@ -467,6 +467,11 @@ export const toedirLoader: ProjectLoader = {
     const byPath = new Map<string, ImportFile>();
     for (const f of files) byPath.set(f.path.replace(/\\/g, '/'), f);
 
+    // project cook rate (".start": "cookrate 60") — the engine cooks on that grid
+    const startFile = byPath.get('.start');
+    const cookMatch = startFile ? (await startFile.text()).match(/^cookrate\s+([\d.]+)/m) : null;
+    const cookRate = cookMatch && Number(cookMatch[1]) > 0 ? Number(cookMatch[1]) : undefined;
+
     // collect nodes: every "<dir>/<name>.n"
     const root = new Map<string, RawNode>();
     const networkOf = (dir: string): Map<string, RawNode> | null => {
@@ -642,7 +647,7 @@ export const toedirLoader: ProjectLoader = {
     if (unmappedParms) report.notes.push(`${unmappedParms} parameters had no mapping and were left at defaults`);
 
     return {
-      json: { app: 'webtoe', version: 1, root: rootNet },
+      json: { app: 'webtoe', version: 1, root: rootNet, ...(cookRate ? { meta: { cookRate } } : {}) },
       report,
     };
   },

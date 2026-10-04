@@ -15,6 +15,7 @@ export {
   type NodeRef, type ParIndexable,
 } from './expr';
 export { Engine } from './engine';
+export { CookClock, type CookPlan, type CookClockOptions } from './clock';
 export { graphToJSON, graphFromJSON, FORMAT_VERSION, LoadError } from './serialize';
 export * as mat4 from './mat4';
 export type { Mat4 } from './mat4';

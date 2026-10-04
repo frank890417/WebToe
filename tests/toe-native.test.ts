@@ -120,6 +120,7 @@ describe('native .toe decoding', () => {
     const viaNative = await toedirLoader.load(toImportFiles(res.files));
     const viaFolder = await toedirLoader.load(await collectImportFiles(join(FIX, 'tiny.expanded')));
     expect(viaNative.json).toEqual(viaFolder.json);
+    expect(viaNative.json.meta?.cookRate).toBe(60); // from .start: "cookrate 60"
     expect(viaNative.report).toEqual(viaFolder.report);
   });
 

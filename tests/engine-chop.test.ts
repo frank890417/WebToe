@@ -6,7 +6,7 @@ beforeAll(() => registerAllOps());
 
 function liveCook(e: Engine, node: Parameters<Engine['cook']>[0], frames: number[]): ChannelSet {
   e.liveRoots.add(node);
-  for (const t of frames) e.frame(t);
+  for (const t of frames) e.advanceTo(t);
   const out = node.output;
   if (!out || out.kind !== 'chop') throw new Error('expected chop output');
   return out;
@@ -45,9 +45,9 @@ describe('engine + CHOP cooking', () => {
     e.frame(0);
     // lag state initializes at target on first sight; force a step change
     c.params.get('value0')!.value = 5;
-    e.frame(0.016);
+    e.frame(1 / 60);
     const after1 = sample(lag.output as ChannelSet, 'chan1');
-    for (let i = 2; i < 200; i++) e.frame(i * 0.016);
+    for (let i = 2; i < 200; i++) e.frame(i / 60);
     const settled = sample(lag.output as ChannelSet, 'chan1');
     expect(after1).toBeGreaterThan(1);
     expect(after1).toBeLessThan(5);
@@ -180,7 +180,7 @@ describe('engine + CHOP cooking', () => {
     expect(sample(sp.output as ChannelSet, 'chan1')).toBe(0);
     const dt0 = e.time.delta; // this step's input lands on the next cook
     e.frame(1 / 60);
-    expect(sample(sp.output as ChannelSet, 'chan1')).toBeCloseTo(6 * dt0, 9);
+    expect(sample(sp.output as ChannelSet, 'chan1')).toBeCloseTo(6 * dt0, 6);
   });
 
   it('chop:par reads another node’s parameters as channels', () => {

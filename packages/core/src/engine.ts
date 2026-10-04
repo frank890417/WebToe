@@ -6,12 +6,14 @@ import {
   type ExprScope, type CompiledExpr, type NodeRef, type ParIndexable,
 } from './expr';
 import type { GpuFacade } from './passes';
+import { CookClock } from './clock';
 import type { InputState, OpOutput, ParamVal, TimeContext } from './types';
 
 /**
- * Pull-based cook engine. `frame()` advances time and cooks the live roots;
- * `cook(node)` memoizes per frame, cooks wired inputs first, and lets
- * expressions pull other nodes (op('x')) with cycle protection.
+ * Pull-based cook engine. `frame()` runs the cook steps that are due on the
+ * fixed-rate clock (TouchDesigner's time model, see clock.ts) and cooks the
+ * live roots once per step; `cook(node)` memoizes per step, cooks wired inputs
+ * first, and lets expressions pull other nodes (op('x')) with cycle protection.
  */
 export class Engine {
   readonly graph = new Graph();
@@ -22,23 +24,64 @@ export class Engine {
   /** nodes the UI wants alive this frame (viewer, display flags, visible thumbs) */
   readonly liveRoots = new Set<NodeInst>();
 
-  private startSeconds: number | null = null;
-  private lastSeconds = 0;
+  private clock = new CookClock({ rate: 60 });
+  private lastNow: number | null = null;
 
-  /** Advance time and cook everything live. `now` = seconds (e.g. performance.now()/1000). */
-  frame(now: number): void {
-    if (this.startSeconds === null) {
-      this.startSeconds = now;
-      this.lastSeconds = now;
+  /** Cook rate in Hz (TouchDesigner's project cook rate; default 60). */
+  get cookRate(): number { return this.clock.rate; }
+  set cookRate(rate: number) {
+    if (!(rate > 0) || rate === this.clock.rate) return;
+    const next = new CookClock({ rate });
+    // keep time continuous: the new grid resumes at the current seconds
+    if (this.clock.anchored && this.lastNow !== null) {
+      const k = Math.floor(this.time.seconds * rate + 1e-9);
+      next.setAnchor(this.lastNow - this.time.seconds, k);
     }
-    const t = now - this.startSeconds;
-    // delta floor = 4ms (250 fps): no real display exceeds it, and it keeps
-    // abnormal drivers (tests, capture tools) from skewing the fps estimate
-    const delta = Math.min(Math.max(now - this.lastSeconds, 1 / 250), 0.25);
-    this.lastSeconds = now;
-    const fps = this.time.fps * 0.95 + (1 / delta) * 0.05;
-    this.time = { seconds: t, frame: this.time.frame + 1, delta, fps };
-    this.gpu?.setTime(t);
+    this.clock = next;
+  }
+
+  /** steps skipped by resyncs (hidden tab, stalls) — for diagnostics/HUD */
+  get skippedSteps(): number { return this.clock.skipped; }
+  /** fitted cost per cook step, seconds (CPU + the GPU time it stretches frames by) */
+  get stepCost(): number { return this.clock.stepCost; }
+
+  /**
+   * Run the cook steps due at `now` (seconds, e.g. performance.now()/1000) and
+   * return how many ran — 0 when the display is ahead of the cook rate (e.g. a
+   * 120 Hz display on a 60 Hz project), in which case outputs are unchanged.
+   */
+  frame(now: number): number {
+    if (this.lastNow !== null) {
+      const d = Math.min(Math.max(now - this.lastNow, 1 / 250), 0.25);
+      this.displayFps = this.displayFps * 0.95 + (1 / d) * 0.05;
+    }
+    this.lastNow = now;
+    if (!this.clock.anchored) this.clock.setAnchor(now);
+    const plan = this.clock.plan(now);
+    return this.clock.execute(plan, (k) => this.step(k));
+  }
+
+  /**
+   * Run *every* step due at `now` — no catch-up cap, no resync. For offline
+   * work (tests, frame export, seeking) where each step must happen.
+   */
+  advanceTo(now: number): number {
+    this.lastNow = now;
+    if (!this.clock.anchored) this.clock.setAnchor(now);
+    return this.clock.execute(this.clock.planAll(now), (k) => this.step(k));
+  }
+
+  /** display frames per second (smoothed) — what the HUD shows */
+  private displayFps = 60;
+
+  private step(k: number): void {
+    this.time = {
+      seconds: this.clock.secondsAt(k),
+      frame: this.time.frame + 1,
+      delta: this.clock.dt,
+      fps: this.displayFps,
+    };
+    this.gpu?.setTime(this.time.seconds);
     for (const node of this.liveRoots) {
       if (this.graph.byId.has(node.id)) this.cook(node);
     }

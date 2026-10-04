@@ -12,7 +12,8 @@ const migrations: ((json: GraphJSON) => GraphJSON)[] = [
 
 export function graphToJSON(graph: Graph, meta?: Record<string, unknown>): GraphJSON {
   const { nodes, wires } = networkToJSON(graph, graph.root);
-  return { app: 'webtoe', version: FORMAT_VERSION, root: { nodes, wires }, ...(meta ? { meta } : {}) };
+  const merged = { ...graph.meta, ...(meta ?? {}) };
+  return { app: 'webtoe', version: FORMAT_VERSION, root: { nodes, wires }, ...(Object.keys(merged).length ? { meta: merged } : {}) };
 }
 
 function networkToJSON(graph: Graph, container: NodeInst): { nodes: NodeJSON[]; wires: WireJSON[] } {
@@ -75,6 +76,7 @@ export function graphFromJSON(raw: unknown): Graph {
     json = mig(json);
   }
   const graph = new Graph();
+  if (json.meta && typeof json.meta === 'object') graph.meta = { ...json.meta };
   buildNetwork(graph, graph.root, json.root.nodes ?? [], json.root.wires ?? []);
   return graph;
 }
