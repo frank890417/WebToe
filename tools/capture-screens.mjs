@@ -90,10 +90,9 @@ await boot(BASE);
 await loadExample(12);
 await shot('import-report.png');
 
-// 6) webgpu backend — hello noise renders identically on both backends
-//    (example 03's ramps hit a WGSL uniform-order bug on WebGPU; tracked in TD-PARITY)
+// 6) webgpu backend — the same lfo garden as the hero, on WebGPU
 await boot(BASE + '?backend=webgpu');
-await loadExample(1);
+await loadExample(3);
 await shot('webgpu.png');
 
 await browser.close();

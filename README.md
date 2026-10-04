@@ -11,14 +11,15 @@
 
 ![WebToe editor running the lfo-garden example](docs/media/hero-lfo-garden.png)
 
-WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the editor is about 200 KB of JavaScript, 60 KB gzipped). It cooks on **TouchDesigner's time model** — a fixed-rate cook clock — and it opens real TouchDesigner projects: a dropped `.toe` is decoded right in the browser (research preview), with your own TouchDesigner's `toeexpand` as the reference fallback.
+WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the editor is about 260 KB of JavaScript, 76 KB gzipped). It cooks on **TouchDesigner's time model** — a fixed-rate cook clock — and it opens real TouchDesigner projects: a dropped `.toe` is decoded right in the browser (research preview), with your own TouchDesigner's `toeexpand` as the reference fallback.
 
 ## Highlights
 
 - **Patch live in the browser** — network editor with a create-operator dialog (`Tab` / double-click: family tabs, searchable grid), wire dragging, container hierarchy with in/out tunneling, **real-time previews on every node** (one GPU compositor paints the viewer and all visible thumbnails), a TouchDesigner-style network backdrop, and a parameter panel with sliders, menus, and per-parameter **expressions** (`op('lfo1')['chan1']`, `parent().par.speed`, `time.seconds * 0.2`, …).
 - **TouchDesigner's time model** — the engine cooks on a fixed grid at the project's cook rate (imported from the `.toe`, 60 Hz by default), so per-step constants such as feedback fades behave as they do in TouchDesigner on any display. State is deterministic (identical whether a frame runs 1, 7 or 24 steps), a 120 Hz display cooks a 60 Hz project 60 times a second, and a busy GPU never sends it into a catch-up death spiral.
-- **Real-time GPU engine** — pull-based cook; TOPs run as GPU passes, CHOPs drive parameters; feedback with TouchDesigner's Target TOP semantics, separable blur, compositing, displacement, edge detection, lookup, a 3D pipeline (SOPs, MATs, geometry/camera/light COMPs, render TOP), webcam/video/image input, and NDI in/out.
-- **Two GPU backends** — WebGL2 (default, universal) and WebGPU (`?backend=webgpu`), both speaking one backend-agnostic pass contract (one known WGSL gap, being fixed: the ramp TOP on WebGPU).
+- **TouchDesigner's numbers** — Level, Edge, Monochrome/Lookup, Ramp, Blur, Noise (Gustavson Perlin/simplex 2D–4D) and Composite (all 46 operations, premultiplied) follow formulas measured against TouchDesigner, with tested tolerances down to 1e-7.
+- **Real-time GPU engine** — pull-based cook; TOPs run as GPU passes, CHOPs drive parameters; feedback with TouchDesigner's Target TOP semantics, a 3D pipeline (SOPs, MATs, geometry/camera/light COMPs, render TOP), webcam/video/image input, and NDI in/out.
+- **Two GPU backends** — WebGL2 (default, universal) and WebGPU (`?backend=webgpu`), both speaking one backend-agnostic pass contract; the TOP shaders render identically on both within 1/255, and a contract test keeps the WGSL uniform layout in step with each operator.
 - **Opens TouchDesigner projects** — drop a `.toe`/`.tox` and it is **decoded natively in the browser**, no TouchDesigner install needed (research use only — see below); supported operators run live, everything else becomes a faithful stub preserving names, wires, layout, parameters, and Python code, with an honest report. Validated byte for byte against `toeexpand` on 125 production projects.
 - **Measured, reproducibly** — `npm run bench` prints one JSON line per project (fps, cook rate, fitted step cost, longest frame, heap growth, skipped steps); the editor's HUD shows display fps, cook rate and skipped steps live.
 - **Own versioned format** — lossless `.webtoe.json` save/load with migration hooks; the cook rate travels with the project.
@@ -29,7 +30,7 @@ WebToe is an original engine and editor built from scratch for the web. It is no
 
 | Operator palette | WebGPU backend |
 |---|---|
-| ![Searchable operator palette](docs/media/palette.png) | ![Hello noise on the WebGPU backend](docs/media/webgpu.png) |
+| ![Searchable operator palette](docs/media/palette.png) | ![The lfo garden example on the WebGPU backend](docs/media/webgpu.png) |
 
 ## Opening TouchDesigner projects
 
@@ -84,16 +85,29 @@ WebToe aims to behave like TouchDesigner where it matters for a ported network, 
 - **Lag CHOP** — the lag time is the time to cover 90% of a step: *a* = 1 − exp(−dt·ln10 / lag).
 - **Speed CHOP** — outputs the accumulation *before* this step; step 0 outputs 0.
 
-TOP operator formulas (level, edge, ramp, blur, noise, composite) are being aligned with the same measurements; [docs/TD-PARITY.md](docs/TD-PARITY.md) tracks what matches and with which tolerance.
+- **TOP formulas** — measured against TouchDesigner and checked by CPU references, with the real shaders compared to those references in Chrome:
+
+| TOP | What matches TouchDesigner | Measured tolerance |
+|---|---|---|
+| Level | order of operations, black level, ranges, low/high, post page; opacity scales RGB and alpha | ≤ 1e-3 |
+| Edge | √strength, black level, offset, Rec.709 luminance, edge over input | ≤ 1.2e-7 |
+| Monochrome, Lookup | Rec.709 luminance, channel menus | exact formula |
+| Ramp | wrapping keys (up to 32), phase/period rules, extend, interpolation | median ≤ 1e-5 (antialias not reproduced) |
+| Blur | full-width size, kernel integrated per texel, single-tap preshrink | ≤ 7.5e-7 |
+| Noise | Gustavson Perlin/simplex 2D–4D, TouchDesigner's coordinates, seeds, octaves = harmon + 1 | ≤ 3.7e-3, 99.9% ≤ 6e-4 |
+| Composite | premultiplied, all 46 operations, transform page | 37 ops ≤ 1e-7, 9 fitted ≤ 3e-5 |
+
+The full table — including what is inferred or approximate, and how to capture TouchDesigner goldens with `tools/td-golden/capture.py` — is in [docs/TD-PARITY.md](docs/TD-PARITY.md).
 
 ## Performance
 
-`npm run bench` (headless Chrome, MacBook Pro M4 Max) — every bundled project holds **60 fps with the cook clock at 60 Hz and zero skipped steps**; the fitted cost per cook step is 0.2–1.0 ms for the authored examples. What keeps it there:
+`npm run bench` (headless Chrome, MacBook Pro M4 Max) — every bundled project holds **60 fps with the cook clock at 60 Hz and zero skipped steps**. Measured directly (60 forced steps, then a synchronous readback), a cook step costs 0.25 ms for feedback trails, 0.50 ms for lfo garden, 0.73 ms for 3d lines and 0.84 ms for the showcase. What keeps it there:
 
 - one cook per step, not per display frame (half the GPU work on a 120 Hz display);
 - every node preview drawn by one GPU compositor;
 - the network backdrop reads pixels back without stalling the pipeline (pixel-pack buffer + fence);
 - no per-pass buffer allocation on WebGPU; both backends request the high-performance adapter;
+- shader hot paths stay in registers (e.g. the ramp picks its keys with static indices — 4.7× faster than indexing a local array);
 - TEA for the `.toe` container runs in a 287-byte WASM kernel (JS fallback), inflate is the platform's own.
 
 ## Operator set
@@ -124,7 +138,7 @@ The website carries the full docs in English and Chinese: [getting started](http
 ```bash
 npm install
 npm run dev        # editor at http://localhost:8643/app/
-npm run check      # typecheck + 141 tests
+npm run check      # typecheck + 208 tests (GPU and TouchDesigner-golden checks run when their env vars are set)
 npm run build      # site + editor → apps/web/dist (/, /zh/, /docs/, /app/)
 npm run site       # site only; npm run site:check guards against drift
 npm run bench      # runtime numbers in headless Chrome (needs the dev server)
@@ -170,4 +184,4 @@ WebToe is an independent open-source project, **not affiliated with or endorsed 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) · third-party notices for the noise and other shader algorithms: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)

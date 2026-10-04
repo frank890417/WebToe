@@ -30,6 +30,24 @@ WebToe 追求的是與 TouchDesigner 在**創作語意上的對齊**（網路、
 - **透過本機橋接程式的網頁對應**：瀏覽器沒有對應功能的 I/O，交給使用者執行的小型本機程式，與匯入橋接程式同一個模式。[NDI 收發](ndi.md)就是這樣推出的；Art-Net、Syphon/Spout 擷取與序列埠可以比照。
 - **僅限原生**，明確不在範圍內：DirectX/SDI/ST 2110、廠商 SDK（Kinect、ZED、Oculus）、C++ 運算子、Notch 與 Substance 宿主。
 
+## 忠實度：跟 TouchDesigner 算出一樣的數字 {#fidelity}
+
+運算子數量說的是有沒有；忠實度說的是匯入的網路能不能畫出**一樣的像素**、用**一樣的節奏**前進。以下行為來自作者自己兩場 TouchDesigner 演出的正式網頁移植，在 TouchDesigner 2025 上用黑箱方式量出來（餵已知輸入、讀回輸出），再由作者移植過來。每條公式都有 CPU 參考實作和測試，真正的 shader 也會在 Chrome 裡跟參考值比對。
+
+| 運算子 | 跟 TouchDesigner 一致的部分 | 實測誤差 |
+|---|---|---|
+| Level | 運算順序、black level、範圍、low/high、post 頁；opacity 同時乘上 RGB 與 alpha | ≤ 1e-3（14 × 2 組） |
+| Edge | TouchDesigner 的公式（√strength、black level、offset）、Rec.709 亮度、邊緣疊在輸入上 | ≤ 1.2e-7（65 組） |
+| Monochrome、Lookup | Rec.709 亮度、TouchDesigner 的通道選單 | 公式完全一致 |
+| Ramp | 色標首尾相接（最多 32 個）、phase／period 規則、延伸、內插、比例適配 | 中位數 ≤ 1e-5（35 組）；不重現 antialias |
+| Blur | size 為全寬、核心按像素積分、單次取樣的預縮 | ≤ 7.5e-7（52 張） |
+| Noise | Gustavson 的 Perlin／simplex 2D–4D、TouchDesigner 的座標、變換頁、種子與八度數 | ≤ 3.7e-3，99.9% ≤ 6e-4 |
+| Composite | 預乘 alpha、全部 46 種運算、變換頁 | 37 種 ≤ 1e-7，9 種擬合 ≤ 3e-5 |
+| Cook 時鐘 | 依專案 cook 速率固定步長；每步的常數在任何螢幕上都跟 TouchDesigner 一樣 | 決定論，有測試 |
+| Lag、Speed、Feedback | lag 是走到 90% 的秒數（a = 1 − exp(−dt·ln10/lag)）；speed 輸出這一步之前的累積；feedback 回傳目標 TOP 的上一步 | 有測試 |
+
+兩個 GPU 後端畫這些 shader 的結果，差距在 1/255 以內。完整表格，以及哪些是推估或近似，見 [docs/TD-PARITY.md](https://github.com/frank890417/WebToe/blob/main/docs/TD-PARITY.md#fidelity--tops-that-reproduce-touchdesigners-numbers)。
+
 ## 引擎概念 {#concepts}
 
 | 概念 | WebToe 現況 |

@@ -30,6 +30,24 @@ The official counts come from the operator categories on docs.derivative.ca (cra
 - **Web-equivalent through a local bridge**: I/O with no browser primitive gets a small local process the user runs, the pattern of the import bridge. [NDI in/out](ndi.md) shipped this way; Art-Net, Syphon/Spout capture and serial would follow it.
 - **Native-only**, declared out of scope: DirectX/SDI/ST 2110, vendor SDKs (Kinect, ZED, Oculus), C++ operators, Notch and Substance hosts.
 
+## Fidelity: the same numbers as TouchDesigner {#fidelity}
+
+Op counts say what exists; fidelity says whether an imported network renders the *same pixels* and moves at the *same pace*. The behaviour below was measured black-box against TouchDesigner 2025 (known inputs in, outputs read back) in the author's own production web port of two TouchDesigner shows, and ported here by the author. CPU references for every formula are tested, and the real shaders are compared with them in Chrome.
+
+| Operator | What matches TouchDesigner | Measured tolerance |
+|---|---|---|
+| Level | TouchDesigner's order of operations, black level, ranges, low/high, post page; opacity scales RGB and alpha | ≤ 1e-3 (14 × 2 cases) |
+| Edge | TouchDesigner's formula (√strength, black level, offset), Rec.709 luminance, edge over input | ≤ 1.2e-7 (65 cases) |
+| Monochrome, Lookup | Rec.709 luminance, TouchDesigner's channel menus | exact formula |
+| Ramp | wrapping keys (up to 32), phase/period rules, extend, interpolation, fit aspect | median ≤ 1e-5 (35 cases); antialias not reproduced |
+| Blur | full-width size, kernel integrated per texel, single-tap preshrink | ≤ 7.5e-7 (52 images) |
+| Noise | Gustavson Perlin/simplex 2D–4D, TouchDesigner's coordinates, transform page, seeds and octave count | ≤ 3.7e-3, 99.9% ≤ 6e-4 |
+| Composite | premultiplied, all 46 operations, transform page | 37 ops ≤ 1e-7, 9 fitted ≤ 3e-5 |
+| Cook clock | fixed-rate steps at the project cook rate; per-step constants behave as in TouchDesigner on any display | deterministic, tested |
+| Lag, Speed, Feedback | lag = time to 90% (a = 1 − exp(−dt·ln10/lag)); speed outputs the sum before this step; feedback returns its Target TOP's previous step | tested |
+
+Both GPU backends render these shaders identically within 1/255. The full table, with what is inferred or approximate, is in [docs/TD-PARITY.md](https://github.com/frank890417/WebToe/blob/main/docs/TD-PARITY.md#fidelity--tops-that-reproduce-touchdesigners-numbers).
+
 ## Engine concepts {#concepts}
 
 | Concept | Status in WebToe |
