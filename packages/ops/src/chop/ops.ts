@@ -311,7 +311,9 @@ export const chopOps: OpSpec[] = [
     alwaysCook: true,
     params: [{ key: 'rate', type: 'float', default: 1, min: -10, max: 10 }],
     cook(ctx) {
-      // integrate input channels over time (TD speed CHOP first-order behavior)
+      // Integrate input channels over cook steps. TD semantics (matched over
+      // 2,635 recorded steps): the output is the sum of the *previous* steps'
+      // input — this step's input lands on the next cook — so step 0 outputs 0.
       const input = asChop(ctx.inputs[0]);
       if (!input) return channels([]);
       const st = ctx.node.state as { acc?: Map<string, number> };
@@ -319,9 +321,9 @@ export const chopOps: OpSpec[] = [
       const rate = ctx.paramNum('rate');
       const out: [string, number][] = input.channels.map((ch) => {
         const v = ch.data[ch.data.length - 1] ?? 0;
-        const acc = (st.acc!.get(ch.name) ?? 0) + v * rate * ctx.time.delta;
-        st.acc!.set(ch.name, acc);
-        return [ch.name, acc];
+        const before = st.acc!.get(ch.name) ?? 0;
+        st.acc!.set(ch.name, before + v * rate * ctx.time.delta);
+        return [ch.name, before];
       });
       return channels(out, input.rate);
     },

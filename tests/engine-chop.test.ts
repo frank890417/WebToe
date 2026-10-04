@@ -154,6 +154,35 @@ describe('engine + CHOP cooking', () => {
     expect(v).toBeLessThan(2.5);
   });
 
+  it('lag follows TD semantics: the lag time covers 90% of a step', () => {
+    const e = new Engine();
+    const c = e.graph.create('chop:constant');
+    c.params.get('value0')!.value = 0;
+    const lag = e.graph.create('chop:lag');
+    lag.params.get('lagup')!.value = 0.5;
+    lag.params.get('lagdown')!.value = 0.5;
+    e.graph.connect(c, lag, 0);
+    e.liveRoots.add(lag);
+    e.frame(0);
+    c.params.get('value0')!.value = 1;
+    for (let i = 1; i <= 30; i++) e.frame(i / 60); // 0.5 s at 60 Hz
+    expect(sample(lag.output as ChannelSet, 'chan1')).toBeCloseTo(0.9, 3);
+  });
+
+  it('speed outputs the accumulation before this step (step 0 = 0)', () => {
+    const e = new Engine();
+    const c = e.graph.create('chop:constant');
+    c.params.get('value0')!.value = 6;
+    const sp = e.graph.create('chop:speed');
+    e.graph.connect(c, sp, 0);
+    e.liveRoots.add(sp);
+    e.frame(0);
+    expect(sample(sp.output as ChannelSet, 'chan1')).toBe(0);
+    const dt0 = e.time.delta; // this step's input lands on the next cook
+    e.frame(1 / 60);
+    expect(sample(sp.output as ChannelSet, 'chan1')).toBeCloseTo(6 * dt0, 9);
+  });
+
   it('chop:par reads another node’s parameters as channels', () => {
     const e = new Engine();
     const lfo = e.graph.create('chop:lfo', undefined, 'wob');

@@ -251,6 +251,7 @@ const PARAM_MAP: Record<string, Record<string, ParamRule>> = {
   'CHOP:select': { channames: { to: 'channames' } },
   'TOP:switch': { index: { to: 'index' } },
   'TOP:select': { top: { to: 'top' } },
+  'TOP:feedback': { top: { to: 'top' } },
   'TOP:flip': { flipx: { to: 'flipx' }, flipy: { to: 'flipy' } },
   'CHOP:switch': { index: { to: 'index' } },
   'CHOP:par': { op: { to: 'oppath' }, pars: { to: 'parnames' } },

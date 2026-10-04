@@ -546,11 +546,23 @@ export const topOps: OpSpec[] = [
     inputs: { min: 1, max: 1 },
     lazyInputs: true,
     alwaysCook: true,
-    params: [],
+    // `top` = TouchDesigner's Target TOP: the output is that TOP's result from
+    // the previous cook step; until it has rendered (first step, reset) the
+    // input passes through. Empty `top` keeps WebToe's original wiring, where
+    // the input itself closes the loop.
+    params: [{ key: 'top', type: 'string', default: '' }],
     backends: ['webgl2', 'webgpu'],
     cook(ctx) {
       if (!requireGpu(ctx)) return null;
       const src = ctx.node.inputs[0];
+      const targetPath = ctx.paramStr('top');
+      if (targetPath) {
+        const target = ctx.engine.graph.resolve(targetPath, ctx.node);
+        if (!target) ctx.node.error = `feedback: target '${targetPath}' not found`;
+        const prevTarget = target ? ctx.gpu!.previousFrame(target) : null;
+        if (prevTarget) return { kind: 'top', tex: prevTarget };
+        return src ? asTop(ctx.engine.cook(src)) : null;
+      }
       if (!src) return null;
       const prev = ctx.gpu!.previousFrame(src);
       if (prev) return { kind: 'top', tex: prev };

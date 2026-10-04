@@ -59,11 +59,14 @@ export const tsKernels: Kernels = {
     return norm > 0 ? sum / norm : 0;
   },
 
+  // TD semantics (measured against TouchDesigner 2025/2026 saves): `lag` is the
+  // time for the output to cover 90% of a step, not a time constant — so
+  // a = 1 − exp(−dt·ln10/lag). Up/down lag picked by the direction of travel.
   lagStep(current, target, lagUp, lagDown, dt) {
     const lag = target > current ? lagUp : lagDown;
-    if (lag <= 1e-6) return target;
-    const k = 1 - Math.exp(-dt / lag);
-    return current + (target - current) * k;
+    if (!(lag > 1e-6) || !(dt > 0)) return target;
+    const k = 1 - Math.exp((-dt * Math.LN10) / lag);
+    return k >= 1 ? target : current + (target - current) * k;
   },
 };
 
