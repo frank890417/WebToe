@@ -13,7 +13,7 @@
  * are always `float` (the backend uploads numbers with uniform1f) and every
  * uniform is at most a vec4, so the same set packs for WGSL too.
  */
-import { RAMP_KC, RAMP_KP, RAMP_MAX_KEYS } from './tdmath';
+import { RAMP_KC, RAMP_KP, rampKeySelect } from './tdmath';
 import { NOISE_LIB_GLSL } from './noiselib';
 import { COMP_LIB_GLSL } from './complib';
 
@@ -137,27 +137,21 @@ uniform float u_tension;
 uniform float u_n;         // key count after wrap keys
 uniform float u_premul;
 ${RAMP_KEY_UNIFORMS_GLSL}
-vec4 KC[${RAMP_MAX_KEYS}];
-float KP[${RAMP_MAX_KEYS}];
-void loadKeys() {
-${RAMP_KC.map((n, i) => `  KC[${i}] = ${n};`).join('\n')}
-${RAMP_KP.map((n, i) => `  KP[${i * 4}] = ${n}.x; KP[${i * 4 + 1}] = ${n}.y; KP[${i * 4 + 2}] = ${n}.z; KP[${i * 4 + 3}] = ${n}.w;`).join('\n')}
-}
 vec4 rampColor(float t) {
   int n = int(u_n + 0.5);
-  int k0 = 0;                                   // last key with pos <= t
-  for (int i = 1; i < ${RAMP_MAX_KEYS}; i++) { if (i >= n) break; if (KP[i] <= t) k0 = i; }
   int last = n - 1;
-  int k1 = min(k0 + 1, last);
-  float span = KP[k1] - KP[k0];
-  float f = t - KP[k0];
+  int k0 = 0;                                   // last key with pos <= t
+  vec4 c0 = vec4(0.0), c1 = vec4(0.0), cm = vec4(0.0), c2 = vec4(0.0);
+  float p0 = 0.0, p1 = 0.0;
+${rampKeySelect('glsl', (n) => n)}
+  float span = p1 - p0;
+  float f = t - p0;
   if (span > 0.0) f /= span;
-  vec4 c0 = KC[k0], c1 = KC[k1];
   int mode = int(u_interp + 0.5);
   if (mode == 0) return c0;
   if (mode == 3) {                              // cardinal spline, tangent (1 − tension)·Δ/2
-    vec4 m0 = (1.0 - u_tension) * 0.5 * (c1 - KC[max(k0 - 1, 0)]);
-    vec4 m1 = (1.0 - u_tension) * 0.5 * (KC[min(k0 + 2, last)] - c0);
+    vec4 m0 = (1.0 - u_tension) * 0.5 * (c1 - cm);
+    vec4 m1 = (1.0 - u_tension) * 0.5 * (c2 - c0);
     float f2 = f * f, f3 = f2 * f;
     return (2.0 * f3 - 3.0 * f2 + 1.0) * c0 + (f3 - 2.0 * f2 + f) * m0 + (f3 - f2) * m1 + (3.0 * f2 - 2.0 * f3) * c1;
   }
@@ -175,7 +169,6 @@ vec4 rampOutside(float t, int ext) {
   return rampColor(rampFold(t, ext));
 }
 void main() {
-  loadKeys();
   int type = int(u_type + 0.5);
   float t;
   if (type == 0) t = v_uv.x;

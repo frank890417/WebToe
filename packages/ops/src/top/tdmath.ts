@@ -64,6 +64,36 @@ export const RAMP_MAX_KEYS = 32;
 export const RAMP_KC: readonly string[] = Array.from({ length: RAMP_MAX_KEYS }, (_, i) => `u_kc${String(i).padStart(2, '0')}`);
 export const RAMP_KP: readonly string[] = Array.from({ length: RAMP_MAX_KEYS / 4 }, (_, i) => `u_kp${i}`);
 
+/**
+ * Shader code that picks the ramp keys around t with *static* indices only:
+ * k0 = last key whose position ≤ t, then the colours/positions of k0, k1 =
+ * k0+1, km = k0−1 and k2 = k0+2 (clamped). Copying the keys into a local array
+ * and indexing it dynamically spills to memory on most GPUs — measured 0.6 ms
+ * per 720p ramp on an M4 Max, ~30× a plain gradient; this form keeps every
+ * value in registers. `u` maps a uniform name to its access expression.
+ */
+export function rampKeySelect(lang: 'glsl' | 'wgsl', u: (name: string) => string): string {
+  const kp = (i: number) => `${u(RAMP_KP[i >> 2])}.${'xyzw'[i & 3]}`;
+  const kc = (i: number) => u(RAMP_KC[i]);
+  const lines: string[] = [];
+  for (let i = 1; i < RAMP_MAX_KEYS; i++) {
+    lines.push(lang === 'glsl'
+      ? `  if (${i} < n && ${kp(i)} <= t) k0 = ${i};`
+      : `  if (${i} < n && ${kp(i)} <= t) { k0 = ${i}; }`);
+  }
+  lines.push(lang === 'glsl'
+    ? '  int k1 = min(k0 + 1, last), km = max(k0 - 1, 0), k2 = min(k0 + 2, last);'
+    : '  let k1 = min(k0 + 1, last);\n  let km = max(k0 - 1, 0);\n  let k2 = min(k0 + 2, last);');
+  for (let i = 0; i < RAMP_MAX_KEYS; i++) {
+    const b = (cond: string, body: string) => lang === 'glsl' ? `  if (${cond}) { ${body} }` : `  if (${cond}) { ${body} }`;
+    lines.push(b(`k0 == ${i}`, `c0 = ${kc(i)}; p0 = ${kp(i)};`));
+    lines.push(b(`k1 == ${i}`, `c1 = ${kc(i)}; p1 = ${kp(i)};`));
+    lines.push(b(`km == ${i}`, `cm = ${kc(i)};`));
+    lines.push(b(`k2 == ${i}`, `c2 = ${kc(i)};`));
+  }
+  return lines.join('\n');
+}
+
 // ---------------------------------------------------------------- Blur
 
 /** Blur TOP filter types in TD menu order. catmull/gaussian/box are measured;

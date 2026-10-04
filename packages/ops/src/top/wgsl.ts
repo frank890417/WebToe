@@ -7,7 +7,7 @@
  * New shaders sample with textureSampleLevel(…, 0) so taps inside data-
  * dependent branches stay valid under WGSL's uniformity rules.
  */
-import { RAMP_KC, RAMP_KP, RAMP_MAX_KEYS } from './tdmath';
+import { RAMP_KC, RAMP_KP, rampKeySelect } from './tdmath';
 import { NOISE_LIB_WGSL } from './noiselib';
 import { COMP_LIB_WGSL } from './complib';
 
@@ -27,31 +27,25 @@ struct Ops { u_color: vec4f }
 export const rampWgsl = `
 ${opsStruct(['u_type', 'u_phase', 'u_repeat', 'u_pos', 'u_aspect', 'u_extl', 'u_extr', 'u_interp', 'u_tension', 'u_n', 'u_premul', ...RAMP_KC, ...RAMP_KP])}
 @group(0) @binding(1) var<uniform> P: Ops;
-var<private> KC: array<vec4f, ${RAMP_MAX_KEYS}>;
-var<private> KP: array<f32, ${RAMP_MAX_KEYS}>;
-fn loadKeys() {
-${RAMP_KC.map((n, i) => `  KC[${i}] = P.${n};`).join('\n')}
-${RAMP_KP.map((n, i) => `  KP[${i * 4}] = P.${n}.x; KP[${i * 4 + 1}] = P.${n}.y; KP[${i * 4 + 2}] = P.${n}.z; KP[${i * 4 + 3}] = P.${n}.w;`).join('\n')}
-}
 fn rampColor(t: f32) -> vec4f {
   let n = i32(P.u_n.x + 0.5);
-  var k0 = 0;
-  for (var i = 1; i < ${RAMP_MAX_KEYS}; i++) {
-    if (i >= n) { break; }
-    if (KP[i] <= t) { k0 = i; }
-  }
   let last = n - 1;
-  let k1 = min(k0 + 1, last);
-  let span = KP[k1] - KP[k0];
-  var f = t - KP[k0];
+  var k0 = 0;
+  var c0 = vec4f(0.0);
+  var c1 = vec4f(0.0);
+  var cm = vec4f(0.0);
+  var c2 = vec4f(0.0);
+  var p0 = 0.0;
+  var p1 = 0.0;
+${rampKeySelect('wgsl', (n) => `P.${n}`)}
+  let span = p1 - p0;
+  var f = t - p0;
   if (span > 0.0) { f = f / span; }
-  let c0 = KC[k0];
-  let c1 = KC[k1];
   let mode = i32(P.u_interp.x + 0.5);
   if (mode == 0) { return c0; }
   if (mode == 3) {
-    let m0 = (1.0 - P.u_tension.x) * 0.5 * (c1 - KC[max(k0 - 1, 0)]);
-    let m1 = (1.0 - P.u_tension.x) * 0.5 * (KC[min(k0 + 2, last)] - c0);
+    let m0 = (1.0 - P.u_tension.x) * 0.5 * (c1 - cm);
+    let m1 = (1.0 - P.u_tension.x) * 0.5 * (c2 - c0);
     let f2 = f * f;
     let f3 = f2 * f;
     return (2.0 * f3 - 3.0 * f2 + 1.0) * c0 + (f3 - 2.0 * f2 + f) * m0 + (f3 - f2) * m1 + (3.0 * f2 - 2.0 * f3) * c1;
@@ -73,7 +67,6 @@ fn rampOutside(t: f32, ext: i32) -> vec4f {
   return rampColor(rampFold(t, ext));
 }
 @fragment fn fs(in: VOut) -> @location(0) vec4f {
-  loadKeys();
   let ty = i32(P.u_type.x + 0.5);
   var t: f32;
   if (ty == 0) {
