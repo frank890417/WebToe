@@ -7,7 +7,8 @@ import { SceneRenderer } from './scene';
  * WebGL2 implementation of the backend-agnostic pass contract.
  * Conventions injected per pass: `u_res` (output size), `u_time` (seconds),
  * inputs bound as `u_tex0..u_tex3`. Each (node, slot) owns a ping-pong texture
- * pair pooled by resolution; `previousFrame` exposes last frame's 'main'.
+ * pair pooled by resolution; `previousFrame` exposes the previous cook step's
+ * 'main' — whether or not the node has already rendered in this step.
  */
 
 interface Target {
@@ -19,8 +20,9 @@ interface Target {
   h: number;
   currHandle: TextureHandle;
   prevHandle: TextureHandle;
-  /** true once at least one pass has rendered into prev */
-  seeded: boolean;
+  /** cook step of the latest render, and how many renders so far */
+  writtenStep: number;
+  renders: number;
 }
 
 interface Program {
@@ -56,6 +58,8 @@ export class WebGL2Backend implements GpuFacade {
   private readonly textures = new Map<number, WebGLTexture>();
   private readonly mediaTargets = new Map<string, { tex: WebGLTexture; handle: TextureHandle; w: number; h: number }>();
   private time = 0;
+  /** cook step counter — one setTime per step */
+  private step = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -64,6 +68,7 @@ export class WebGL2Backend implements GpuFacade {
       antialias: false,
       premultipliedAlpha: false,
       preserveDrawingBuffer: false,
+      powerPreference: 'high-performance', // dual-GPU laptops: the discrete GPU
     });
     if (!gl) throw new Error('WebGL2 is not available in this browser');
     this.gl = gl;
@@ -81,6 +86,7 @@ export class WebGL2Backend implements GpuFacade {
 
   setTime(seconds: number): void {
     this.time = seconds;
+    this.step++;
   }
 
   registerShader(id: string, sources: ShaderSources): void {
@@ -118,14 +124,23 @@ export class WebGL2Backend implements GpuFacade {
     t.currHandle = t.prevHandle;
     t.prev = oldCurr;
     t.prevHandle = oldCurrHandle;
-    t.seeded = true;
+    t.writtenStep = this.step;
+    t.renders++;
     return t.currHandle;
   }
 
+  /**
+   * The node's output from the previous cook step. A feedback op usually cooks
+   * *before* its target within a step: then `curr` still holds last step's
+   * result (returning `prev` there would hand back the step before that and
+   * split the loop into two interleaved ones). After the target has rendered
+   * in this step, last step's result has moved to `prev`.
+   */
   previousFrame(node: NodeInst): TextureHandle | null {
     const t = this.targets.get(`${node.id}:main`);
-    if (!t || !t.seeded) return null;
-    return t.prevHandle;
+    if (!t || t.renders === 0) return null;
+    if (t.writtenStep === this.step) return t.renders >= 2 ? t.prevHandle : null;
+    return t.currHandle;
   }
 
   private scene: SceneRenderer | null = null;
@@ -147,7 +162,8 @@ export class WebGL2Backend implements GpuFacade {
     t.currHandle = t.prevHandle;
     t.prev = oldCurr;
     t.prevHandle = oldCurrHandle;
-    t.seeded = true;
+    t.writtenStep = this.step;
+    t.renders++;
     return t.currHandle;
   }
 
@@ -319,7 +335,8 @@ export class WebGL2Backend implements GpuFacade {
         curr, prev, fbo, depth: null, w: W, h: H,
         currHandle: this.handleFor(curr, W, H),
         prevHandle: this.handleFor(prev, W, H),
-        seeded: false,
+        writtenStep: -1,
+        renders: 0,
       };
       this.targets.set(key, t);
     }

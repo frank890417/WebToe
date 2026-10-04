@@ -13,8 +13,8 @@ type Tex = { node: string; frame: number };
 
 /** Records one handle per node per frame; previousFrame = last frame's handle. */
 function recordingGpu(engine: Engine): GpuFacade {
-  const cur = new Map<string, Tex>();
-  const prev = new Map<string, Tex>();
+  const cur = new Map<NodeInst['id'], Tex>();
+  const prev = new Map<NodeInst['id'], Tex>();
   let frame = -1;
   const gpu = {
     name: 'webgl2',
@@ -52,11 +52,11 @@ describe('feedback TOP (Target TOP semantics)', () => {
     e.liveRoots.add(lvl);
 
     e.frame(0);
-    const step0 = (fb.output as { tex: Tex }).tex;
+    const step0 = (fb.output as unknown as { tex: Tex }).tex;
     expect(step0.node).toBe('seed'); // target has not rendered yet → input
 
     e.frame(1 / 60);
-    const step1 = (fb.output as { tex: Tex }).tex;
+    const step1 = (fb.output as unknown as { tex: Tex }).tex;
     expect(step1).toEqual({ node: 'lvl', frame: 1 }); // lvl's result from the previous step
     expect(fb.error).toBeNull();
   });
@@ -70,7 +70,7 @@ describe('feedback TOP (Target TOP semantics)', () => {
     e.graph.connect(seed, fb, 0);
     e.liveRoots.add(fb);
     e.frame(0);
-    expect((fb.output as { tex: Tex }).tex.node).toBe('seed');
+    expect((fb.output as unknown as { tex: Tex }).tex.node).toBe('seed');
     expect(fb.error).toMatch(/not found/);
   });
 });

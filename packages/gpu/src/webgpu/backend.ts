@@ -22,7 +22,12 @@ interface Target {
   h: number;
   currHandle: TextureHandle;
   prevHandle: TextureHandle;
-  seeded: boolean;
+  /** cook step of the latest render, and how many renders so far */
+  writtenStep: number;
+  renders: number;
+  /** persistent uniform buffer, grown on demand (was one leaked buffer per pass) */
+  ubo: GPUBuffer | null;
+  uboSize: number;
 }
 
 const FORMAT: GPUTextureFormat = 'rgba8unorm';
@@ -67,6 +72,8 @@ let nextHandleId = 1_000_000; // distinct range from webgl2 for debuggability
 export class WebGPUBackend implements GpuFacade {
   readonly name = 'webgpu' as const;
   private time = 0;
+  /** cook step counter — one setTime per step */
+  private step = 0;
   private readonly sources = new Map<string, ShaderSources>();
   private readonly pipelines = new Map<string, GPURenderPipeline>();
   private readonly targets = new Map<string, Target>();
@@ -83,7 +90,7 @@ export class WebGPUBackend implements GpuFacade {
 
   static async create(canvas: HTMLCanvasElement): Promise<WebGPUBackend> {
     if (!('gpu' in navigator)) throw new Error('WebGPU is not available in this browser');
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('no WebGPU adapter');
     const device = await adapter.requestDevice();
     const context = canvas.getContext('webgpu');
@@ -96,6 +103,7 @@ export class WebGPUBackend implements GpuFacade {
 
   setTime(seconds: number): void {
     this.time = seconds;
+    this.step++;
   }
 
   registerShader(id: string, sources: ShaderSources): void {
@@ -110,10 +118,12 @@ export class WebGPUBackend implements GpuFacade {
     // (uniform buffer offsets must be 256-aligned)
     const keys = Object.keys(spec.uniforms).sort();
     const opsBytes = Math.max(16, keys.length * 16);
-    const ubo = this.device.createBuffer({
-      size: 256 + opsBytes,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    if (!t.ubo || t.uboSize < 256 + opsBytes) {
+      t.ubo?.destroy();
+      t.uboSize = 256 + opsBytes;
+      t.ubo = this.device.createBuffer({ size: t.uboSize, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    }
+    const ubo = t.ubo;
     const globals = new Float32Array([t.w, t.h, 0, 0, this.time, 0, 0, 0]);
     this.device.queue.writeBuffer(ubo, 0, globals);
     const ops = new Float32Array(opsBytes / 4);
@@ -151,13 +161,17 @@ export class WebGPUBackend implements GpuFacade {
     t.currHandle = t.prevHandle;
     t.prev = oldCurr;
     t.prevHandle = oldCurrHandle;
-    t.seeded = true;
+    t.writtenStep = this.step;
+    t.renders++;
     return t.currHandle;
   }
 
+  /** The node's output from the previous cook step (see the WebGL2 backend). */
   previousFrame(node: NodeInst): TextureHandle | null {
     const t = this.targets.get(`${node.id}:main`);
-    return t?.seeded ? t.prevHandle : null;
+    if (!t || t.renders === 0) return null;
+    if (t.writtenStep === this.step) return t.renders >= 2 ? t.prevHandle : null;
+    return t.currHandle;
   }
 
   renderScene(): TextureHandle {
@@ -355,6 +369,7 @@ export class WebGPUBackend implements GpuFacade {
     for (const [key, t] of this.targets) {
       if (key.startsWith(`${node.id}:`)) {
         t.curr.destroy();
+        t.ubo?.destroy();
         t.prev.destroy();
         this.textures.delete(t.currHandle.id);
         this.textures.delete(t.prevHandle.id);
@@ -372,6 +387,7 @@ export class WebGPUBackend implements GpuFacade {
   dispose(): void {
     for (const t of this.targets.values()) {
       t.curr.destroy();
+      t.ubo?.destroy();
       t.prev.destroy();
     }
     for (const m of this.mediaTargets.values()) m.tex.destroy();
@@ -422,6 +438,7 @@ export class WebGPUBackend implements GpuFacade {
     let t = this.targets.get(key);
     if (t && (t.w !== W || t.h !== H)) {
       t.curr.destroy();
+      t.ubo?.destroy();
       t.prev.destroy();
       this.textures.delete(t.currHandle.id);
       this.textures.delete(t.prevHandle.id);
@@ -440,7 +457,7 @@ export class WebGPUBackend implements GpuFacade {
       const prevHandle = { id: nextHandleId++, width: W, height: H };
       this.textures.set(currHandle.id, curr);
       this.textures.set(prevHandle.id, prev);
-      t = { curr, prev, w: W, h: H, currHandle, prevHandle, seeded: false };
+      t = { curr, prev, w: W, h: H, currHandle, prevHandle, writtenStep: -1, renders: 0, ubo: null, uboSize: 0 };
       this.targets.set(key, t);
     }
     return t;
