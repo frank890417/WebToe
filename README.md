@@ -1,24 +1,27 @@
 # WebToe
 
-**A web-native, node-based dataflow engine for real-time visuals — patch operators together in the browser, TouchDesigner-style, and import your existing TouchDesigner projects.**
+**A web-native, node-based dataflow engine for real-time visuals — patch operators together in the browser, TouchDesigner-style, and open your existing TouchDesigner projects.**
 
 [![ci](https://github.com/frank890417/WebToe/actions/workflows/ci.yml/badge.svg)](https://github.com/frank890417/WebToe/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![live demo](https://img.shields.io/badge/live-webtoe.openaudiovisual.com-7c6cff)](https://webtoe.openaudiovisual.com/)
+[![website](https://img.shields.io/badge/site-webtoe.openaudiovisual.com-7c6cff)](https://webtoe.openaudiovisual.com/)
+[![docs](https://img.shields.io/badge/docs-read-7c6cff)](https://webtoe.openaudiovisual.com/docs/)
 
-**▶ Try it now: [webtoe.openaudiovisual.com](https://webtoe.openaudiovisual.com/)** — no install, runs entirely in your browser.
+**▶ [Open the editor](https://webtoe.openaudiovisual.com/app/)** — no install, runs entirely in your browser · [Website](https://webtoe.openaudiovisual.com/) ([中文](https://webtoe.openaudiovisual.com/zh/)) · [Docs](https://webtoe.openaudiovisual.com/docs/) · [Open a raw `.toe` in the browser](https://webtoe.openaudiovisual.com/?project=examples/toe/2022-fractals.toe)
 
 ![WebToe editor running the lfo-garden example](docs/media/hero-lfo-garden.png)
 
-WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the editor is about 200 KB of JS, 60 KB gzipped), and it opens real TouchDesigner projects — a dropped `.toe` is decoded right in the browser (research preview), with your own TD installation's `toeexpand` as the reference fallback.
+WebToe is an original engine and editor built from scratch for the web. It is not a TouchDesigner clone or port — it implements the workflow (operator families, wired networks, expression-driven parameters, a live cook loop) natively on **WebGL2 and WebGPU**, with **zero runtime dependencies** (the editor is about 200 KB of JavaScript, 60 KB gzipped). It cooks on **TouchDesigner's time model** — a fixed-rate cook clock — and it opens real TouchDesigner projects: a dropped `.toe` is decoded right in the browser (research preview), with your own TouchDesigner's `toeexpand` as the reference fallback.
 
 ## Highlights
 
-- **Patch live in the browser** — network editor with a create-operator dialog (`Tab` / double-click: family tabs, searchable grid), wire dragging, container hierarchy with in/out tunneling, **real-time previews on every node** (one GPU compositor paints the viewer and all visible thumbnails at full frame rate — no CPU readbacks), and a parameter panel with sliders, menus, and per-parameter **expressions** (`op('lfo1')['chan1']`, `parent().par.speed`, `time.seconds * 0.2`, …).
-- **Real-time GPU engine** — pull-based cook loop; TOPs run as GPU passes, CHOPs drive parameters; feedback loops, separable blur, 6-mode compositing, displacement, edge detection, webcam/video/image input.
-- **Two GPU backends at parity** — WebGL2 (default, universal) and WebGPU (`?backend=webgpu`), both speaking one backend-agnostic pass contract; WebGPU's compute path is reserved for the upcoming particle family.
-- **TouchDesigner import** — drop a `.toe`/`.tox` and it is **decoded natively in the browser**, no TD install needed (research use only — see below); supported operators run live, everything else becomes a faithful stub preserving names, wires, layout, parameters, and Python code, with an honest report. Verified byte for byte against `toeexpand` on 125 production projects.
-- **Own versioned format** — lossless `.webtoe.json` save/load with migration hooks.
+- **Patch live in the browser** — network editor with a create-operator dialog (`Tab` / double-click: family tabs, searchable grid), wire dragging, container hierarchy with in/out tunneling, **real-time previews on every node** (one GPU compositor paints the viewer and all visible thumbnails), a TouchDesigner-style network backdrop, and a parameter panel with sliders, menus, and per-parameter **expressions** (`op('lfo1')['chan1']`, `parent().par.speed`, `time.seconds * 0.2`, …).
+- **TouchDesigner's time model** — the engine cooks on a fixed grid at the project's cook rate (imported from the `.toe`, 60 Hz by default), so per-step constants such as feedback fades behave as they do in TouchDesigner on any display. State is deterministic (identical whether a frame runs 1, 7 or 24 steps), a 120 Hz display cooks a 60 Hz project 60 times a second, and a busy GPU never sends it into a catch-up death spiral.
+- **Real-time GPU engine** — pull-based cook; TOPs run as GPU passes, CHOPs drive parameters; feedback with TouchDesigner's Target TOP semantics, separable blur, compositing, displacement, edge detection, lookup, a 3D pipeline (SOPs, MATs, geometry/camera/light COMPs, render TOP), webcam/video/image input, and NDI in/out.
+- **Two GPU backends** — WebGL2 (default, universal) and WebGPU (`?backend=webgpu`), both speaking one backend-agnostic pass contract (one known WGSL gap, being fixed: the ramp TOP on WebGPU).
+- **Opens TouchDesigner projects** — drop a `.toe`/`.tox` and it is **decoded natively in the browser**, no TouchDesigner install needed (research use only — see below); supported operators run live, everything else becomes a faithful stub preserving names, wires, layout, parameters, and Python code, with an honest report. Validated byte for byte against `toeexpand` on 125 production projects.
+- **Measured, reproducibly** — `npm run bench` prints one JSON line per project (fps, cook rate, fitted step cost, longest frame, heap growth, skipped steps); the editor's HUD shows display fps, cook rate and skipped steps live.
+- **Own versioned format** — lossless `.webtoe.json` save/load with migration hooks; the cook rate travels with the project.
 
 | Feedback trails (mouse-driven) | CHOP scope & channels |
 |---|---|
@@ -26,33 +29,33 @@ WebToe is an original engine and editor built from scratch for the web. It is no
 
 | Operator palette | WebGPU backend |
 |---|---|
-| ![Searchable operator palette](docs/media/palette.png) | ![Same project on the WebGPU backend](docs/media/webgpu.png) |
+| ![Searchable operator palette](docs/media/palette.png) | ![Hello noise on the WebGPU backend](docs/media/webgpu.png) |
 
-## Importing your TouchDesigner projects
+## Opening TouchDesigner projects
 
-![Import report dialog after importing a 213-node production project](docs/media/import-report.png)
+![Import report after decoding a raw 2022 TouchDesigner file in the browser](docs/media/import-report.png)
 
-**Drop a `.toe` on the page and it opens.** No install, no CLI step, no folder shuffling — the container is decoded right in your browser. [Try it with a raw 2022 project file](https://webtoe.openaudiovisual.com/?project=examples/toe/2022-fractals.toe) (saved by TouchDesigner 2021.16410).
+**Drop a `.toe` on the page and it opens.** No install, no CLI step, no folder shuffling — the container is decoded right in your browser and the file never leaves your machine. [Try it with a raw 2022 project file](https://webtoe.openaudiovisual.com/?project=examples/toe/2022-fractals.toe) (saved by TouchDesigner 2021.16410); the report above is what it shows.
 
-> **Native `.toe` decoding is provided for research purposes only.** It exists to study interoperability with project files you own, is not affiliated with or endorsed by Derivative Inc., and may break with any TouchDesigner release (Derivative has announced an official JSON project format; WebToe's `ProjectLoader` interface is ready for it). The bridge path below — your own TouchDesigner's `toeexpand` — stays the reference and the automatic fallback. Format notes and validation: **[docs/TOE-FORMAT.md](docs/TOE-FORMAT.md)**.
+> **Native `.toe` decoding is provided for research purposes only.** It exists to study interoperability with project files you own, is not affiliated with or endorsed by Derivative Inc., and may break with any TouchDesigner release (Derivative has announced an official JSON project format; WebToe's `ProjectLoader` interface is ready for it). The bridge path below — your own TouchDesigner's `toeexpand` — stays the reference and the automatic fallback. Format notes and validation: **[docs/TOE-FORMAT.md](docs/TOE-FORMAT.md)** · [on the website](https://webtoe.openaudiovisual.com/docs/toe-format/).
 
-Validated against the official `toeexpand` (TD 2025.33070) on **125 production project files** from 3 KB to 151 MB: identical file sets, byte for byte (553,230 files), in **17.7 s versus 266.5 s** for `toeexpand` — a 151 MB show file decodes in 4.2 s, a daily sketch in a few milliseconds. Where TouchDesigner has sibling operators whose names differ only in case, the native decoder keeps both; `toeexpand`, writing to a case-insensitive disk, merges them.
+**Measured in Chrome** (MacBook Pro, M4 Max): a 20 MB production show file decodes in **0.35 s** into 33,923 files, and the whole drop-to-running-graph takes **0.54 s** — 14,656 nodes, 71% runnable, 2,246 Python expressions translated. A 151 MB show file decodes in 1.8 s. Through the bridge, a comparable file took 8 s.
 
-**The reference path: your own TouchDesigner.** If native decoding fails, or you force it with `?toe=bridge`, the one step that needs TouchDesigner — the official `toeexpand` CLI, shipped with every TD install — runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
+**Validated** against the official `toeexpand` (TouchDesigner 2025.33070) on **125 production project files** from 3 KB to 151 MB, saved by builds from 2021.16410 to 2025: identical file sets, byte for byte (553,230 files), in 17.7 s versus 266.5 s for `toeexpand`. Where TouchDesigner has sibling operators whose names differ only in case, the native decoder keeps both; `toeexpand`, writing to a case-insensitive disk, merges them.
+
+**The reference path: your own TouchDesigner.** If native decoding fails, or you force it with `?toe=bridge`, the one step that needs TouchDesigner — the official `toeexpand` CLI, shipped with every TouchDesigner install — runs on your machine, through a small loopback service (`packages/bridge`). It binds to `127.0.0.1` only, has zero dependencies, and ships nothing of Derivative's: your project files never leave your computer.
 
 ```bash
-npx webtoe        # serves the app locally with the bridge — then just drag your .toe in
+npx webtoe        # serves the site and the editor locally with the bridge — then drag your .toe in
 ```
 
-**No Node?** Every TouchDesigner install ships Python, so the same bridge is one stdlib-only file. Download [`bridge.py`](https://webtoe.openaudiovisual.com/bridge.py) (the guide modal links it), then `python3 bridge.py` (TD's bundled interpreter works too) and drop your `.toe` on the hosted page. Protocol-identical to `npx webtoe`.
-
-Already using the hosted app with Node? Run the bridge alone in a terminal and the hosted page will find it. If native decoding fails and no bridge is running, dropping a `.toe` opens a guide that keeps watching for one — and the manual routes below still work.
+**No Node?** Every TouchDesigner install ships Python, so the same bridge is one stdlib-only file. Download [`bridge.py`](https://webtoe.openaudiovisual.com/bridge.py) (the guide dialog links it), then `python3 bridge.py` (TouchDesigner's bundled interpreter works too) and drop your `.toe` on the hosted page. Protocol-identical to `npx webtoe`.
 
 ```bash
-# bridge only, for the hosted app at webtoe.openaudiovisual.com
+# bridge only, for the hosted editor at webtoe.openaudiovisual.com/app/
 npx webtoe --no-open
 
-# share one bridge over LAN/Tailscale (e.g. TD on a Windows box, browsing elsewhere)
+# share one bridge over LAN/Tailscale (e.g. TouchDesigner on a Windows box, browsing elsewhere)
 npx webtoe --host 0.0.0.0 --token <secret>   # page: ?bridge=…&bridgeToken=<secret>
 
 # no Node? expand by hand, then drop the resulting .toe.dir folder on the page
@@ -62,9 +65,7 @@ npx webtoe --host 0.0.0.0 --token <secret>   # page: ?bridge=…&bridgeToken=<se
 node packages/cli/toe-convert.mjs myproject.toe        # → myproject.webtoe.json
 ```
 
-Measured on a real 20 MB show file (14,710 nodes): **8 seconds from drop to a running graph**, 70% of nodes runnable, 2,244 expressions translated.
-
-What the importer recovers: node types and hierarchy, wires (including wires across COMP boundaries and in/out tunnels), parameter values, **live Python expressions** (translated to WebToe expressions where faithful — `absTime.seconds*0.2` → `time.seconds*0.2` — and kept inert otherwise), DAT text and Python source, and network layout. The parameter mode field is a bitfield decoded from production files (bit 0 = expression), so flagged expression modes import too.
+What the importer recovers: node types and hierarchy, wires (including wires across COMP boundaries and in/out tunnels), parameter values, **live Python expressions** (translated to WebToe expressions where faithful — `absTime.seconds*0.2` → `time.seconds*0.2` — and kept inert otherwise), DAT text and Python source, network layout, and the project's cook rate. The parameter mode field is a bitfield decoded from production files (bit 0 = expression), so flagged expression modes import too.
 
 ### Tested, automatically
 
@@ -72,33 +73,62 @@ What the importer recovers: node types and hierarchy, wires (including wires acr
 
 1. a CI-safe layer asserts the full reconstructed graph — types, COMP-boundary and tunnel wires, parameter modes, translated expressions evaluated in the engine, honest stubs, report numbers, plus the sidecar container decoder;
 2. the native decoder (CI-safe): the fixture decodes byte for byte to the committed expansion through both inflaters and imports to the identical graph; synthetic containers cover multi-segment archives, chunked kind-12 segments with records straddling chunks, chance segment magic in the ciphertext, and the recovery path;
-3. an integration layer (auto-skipped where TD isn't installed) expands the committed binary with the real `toeexpand` and runs the CLI and the bridge end-to-end — including a project whose filename is not English.
+3. an integration layer (auto-skipped where TouchDesigner isn't installed) expands the committed binary with the real `toeexpand` and runs the CLI and the bridge end-to-end — including a project whose filename is not English.
 
-## Operator set (v1)
+## TouchDesigner semantics
+
+WebToe aims to behave like TouchDesigner where it matters for a ported network, not just look like it. Behaviour is taken from measurements against TouchDesigner made in the author's production web port of two TouchDesigner shows (2025–2026) and checked by tests here:
+
+- **Cook clock** — a fixed-rate grid at the project cook rate (`packages/core/src/clock.ts`): step *k* is at *k* / rate seconds; the display shows the latest step. Catch-up uses a least-squares cost model over the last 16 frames (frame ≈ fixed cost + steps × step cost, 100 ms frame cap), and more than one second behind (a hidden tab, a stall) it skips ahead instead of replaying. `engine.advanceTo(t)` runs every step for offline work.
+- **Feedback TOP** — the `top` parameter is TouchDesigner's Target TOP: the output is that TOP's result from the previous cook step, and the input passes through until it has rendered. Both GPU backends return the previous step whether or not the target has already rendered in this step (verified with a counter loop: 174 steps → 174/255).
+- **Lag CHOP** — the lag time is the time to cover 90% of a step: *a* = 1 − exp(−dt·ln10 / lag).
+- **Speed CHOP** — outputs the accumulation *before* this step; step 0 outputs 0.
+
+TOP operator formulas (level, edge, ramp, blur, noise, composite) are being aligned with the same measurements; [docs/TD-PARITY.md](docs/TD-PARITY.md) tracks what matches and with which tolerance.
+
+## Performance
+
+`npm run bench` (headless Chrome, MacBook Pro M4 Max) — every bundled project holds **60 fps with the cook clock at 60 Hz and zero skipped steps**; the fitted cost per cook step is 0.2–1.0 ms for the authored examples. What keeps it there:
+
+- one cook per step, not per display frame (half the GPU work on a 120 Hz display);
+- every node preview drawn by one GPU compositor;
+- the network backdrop reads pixels back without stalling the pipeline (pixel-pack buffer + fence);
+- no per-pass buffer allocation on WebGPU; both backends request the high-performance adapter;
+- TEA for the `.toe` container runs in a 287-byte WASM kernel (JS fallback), inflate is the platform's own.
+
+## Operator set
+
+81 operators, plus per-family stubs used by the importer:
 
 | Family | Operators |
 |---|---|
-| TOP | constant, noise, ramp, rectangle, transform, level, monochrome, hsv adjust, blur, composite, math, switch, select, reorder, flip, displace, edge, feedback, **render**, **ndi in/out** (via the local bridge), null, in, out, image in, video in, camera in |
-| CHOP | constant, lfo, noise, math (full TD pipeline), lag, merge, select, switch, speed, parameter, mouse in, in, out |
-| SOP | line, circle, rectangle, grid, sphere, box, tube, torus, merge, transform, noise, copy, skin, add, point, facet, switch, null, in, out |
-| MAT | constant, lit (phong/pbr), line, point sprite, wireframe, switch, null |
-| COMP | container, **geometry** (SOP networks, materials, SOP-point instancing), **camera** (look-at), **light**, **ambient light** |
-| DAT | text, table, select, null, in, out |
+| TOP (28) | constant, noise, ramp, rectangle, transform, level, monochrome, hsv adjust, blur, composite, displace, lookup, edge, feedback, math, switch, select, reorder, flip, **render**, **ndi in/out** (via the local bridge), image in, video in, camera in, null, in, out |
+| CHOP (14) | constant, lfo, noise, math (full TouchDesigner pipeline), lag, merge, select, switch, speed, parameter, mouse in, sop to, in, out |
+| SOP (21) | line, circle, rectangle, grid, sphere, box, tube, torus, merge, transform, twist, noise, copy, skin, point, facet, add, switch, null, in, out |
+| MAT (7) | constant, lit (phong/pbr), line, point sprite, wireframe, switch, null |
+| COMP (5) | container, **geometry** (SOP networks, materials, SOP-point and CHOP-channel instancing), **camera** (look-at), **light**, **ambient light** |
+| DAT (6) | text, table, select, null, in, out |
 
-Plus per-family stub operators used by the importer. Expressions ship with `time`, `me`, `op()` channel access, and a math library (`sin`, `clamp`, `fract`, `lerp`, `rand(seed)`, …).
+Expressions ship with `time`, `me`, `op()` channel access, `parent()`, `ext()` for external control, and a math library (`sin`, `clamp`, `fract`, `lerp`, `rand(seed)`, …). Reference: [operators](https://webtoe.openaudiovisual.com/docs/operators/) · [expressions](https://webtoe.openaudiovisual.com/docs/expressions/).
 
 ## Examples
 
-Twelve bundled projects load from the toolbar and run out of the box — the last two, **11** and **12**, are raw `.toe` files saved by TouchDesigner 2021.16410, decoded natively the moment you pick them. The flagship is **09 showcase** — 27 nodes exercising every family at once: a webcam layer through edge detection, a kaleidoscope COMP with in/out tunnels, a mouse-position source switch, noise displacement, hue-drifting feedback trails, and a full CHOP rig (lag, speed integrator, parameter reader, full math pipeline) driving it through eight live expressions. Newest: **10 3d lines** — the full 3D pipeline: skinned line ribbons and noise-scattered instanced spheres inside geometry COMPs, an orbiting look-at camera, lights, a render TOP, and a glow post chain. Also: five authored 2D patches — **hello noise** (expression-driven brightness), **feedback trails** (move your mouse over the viewer), **lfo garden** (additive ramp chains with hue drift), **webcam displace** (allow camera access; degrades gracefully without one), **chop playground** (select `merge1` to scope raw vs lagged channels) — and three **real 2022 TouchDesigner daily sketches imported through the `.toe` pipeline** (pseudo-voronoi, fractal feedback, and a mouse-interactive CHOP study; lightly adapted for the web, e.g. movie sources swapped for noise).
+Twelve bundled projects load from the editor's toolbar and run out of the box ([examples page](https://webtoe.openaudiovisual.com/docs/examples/)). The flagship is **09 showcase** — 27 nodes exercising every family at once: a webcam layer through edge detection, a kaleidoscope COMP with in/out tunnels, a mouse-position source switch, noise displacement, hue-drifting feedback trails, and a full CHOP rig (lag, speed integrator, parameter reader, full math pipeline) driving it through eight live expressions. **10 3d lines** runs the full 3D pipeline: skinned line ribbons and noise-scattered instanced spheres inside geometry COMPs, an orbiting look-at camera, lights, a render TOP, and a glow post chain. Five authored 2D patches — **hello noise**, **feedback trails** (move your mouse over the viewer), **lfo garden**, **webcam displace**, **chop playground** — and three **2022 TouchDesigner daily sketches imported through the `.toe` pipeline** (pseudo-voronoi, fractal feedback, a mouse-interactive CHOP study; lightly adapted for the web). **11** and **12** are the raw `.toe` files of two of those sketches, saved by TouchDesigner 2021.16410 and decoded natively the moment you pick them.
+
+## Documentation
+
+The website carries the full docs in English and Chinese: [getting started](https://webtoe.openaudiovisual.com/docs/getting-started/) · [examples](https://webtoe.openaudiovisual.com/docs/examples/) · [importing TouchDesigner projects](https://webtoe.openaudiovisual.com/docs/importing/) · [the .toe format](https://webtoe.openaudiovisual.com/docs/toe-format/) · [operators](https://webtoe.openaudiovisual.com/docs/operators/) · [expressions](https://webtoe.openaudiovisual.com/docs/expressions/) · [embedding & external control](https://webtoe.openaudiovisual.com/docs/embedding/) · [NDI](https://webtoe.openaudiovisual.com/docs/ndi/) · [architecture](https://webtoe.openaudiovisual.com/docs/architecture/) · [TouchDesigner parity](https://webtoe.openaudiovisual.com/docs/td-parity/). The docs sources live in [`site/docs/`](site/docs/).
 
 ## Quick start (development)
 
 ```bash
 npm install
-npm run dev        # editor at http://localhost:8643/
-npm run check      # typecheck + 60-test suite
-npm run build      # production build (apps/web/dist)
-node tools/capture-screens.mjs   # regenerate README screenshots (needs dev server + Chrome)
+npm run dev        # editor at http://localhost:8643/app/
+npm run check      # typecheck + 141 tests
+npm run build      # site + editor → apps/web/dist (/, /zh/, /docs/, /app/)
+npm run site       # site only; npm run site:check guards against drift
+npm run bench      # runtime numbers in headless Chrome (needs the dev server)
+node tools/capture-screens.mjs   # regenerate the README screenshots (needs the dev server + Chrome)
 ```
 
 ## Architecture
@@ -107,29 +137,24 @@ npm workspaces with a strict downward dependency rule — `apps/web → editor �
 
 | Package | Role |
 |---|---|
-| `@webtoe/core` | graph model, pull-based cook engine, expression system, backend-agnostic GPU pass contract, versioned serialization, public `registerOp` plugin API |
+| `@webtoe/core` | graph model, pull-based cook engine on the fixed-rate cook clock, expression system, backend-agnostic GPU pass contract, versioned serialization, public `registerOp` plugin API |
 | `@webtoe/ops` | operator definitions; CHOP kernels behind a WASM-ready interface; TOP shaders authored per backend (GLSL **and** WGSL, hand-written) |
-| `@webtoe/gpu` | WebGL2 backend + WebGPU backend (parity), texture pools, ping-pong feedback, async readback thumbnails |
+| `@webtoe/gpu` | WebGL2 backend + WebGPU backend, texture pools, step-aware ping-pong feedback, non-blocking readback |
 | `@webtoe/io` | `.webtoe.json`, the native `.toe` container decoder (research use only), and the expansion importer behind a `ProjectLoader` adapter (Derivative's announced official JSON format slots in beside it) |
 | `@webtoe/editor` | embeddable, framework-free editor — `mountEditor(el, opts)` |
 | `@webtoe/cli` | `toe-convert.mjs` |
-| `webtoe-bridge` | loopback service: serves the app and runs your own `toeexpand` so `.toe` is a plain drop target |
+| `webtoe-bridge` | loopback service: serves the site and the editor and runs your own `toeexpand` |
+| `tools/site` | dependency-free generator for the website and docs (`npm run site`) |
 
 Deep dives: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · execution contract & milestones: [PLAN.md](PLAN.md) · build log: [WORKLOG.md](WORKLOG.md) · research foundation (file-format findings, feasibility, sources): [docs/RESEARCH.md](docs/RESEARCH.md)
 
 ## Roadmap — measured against real work
 
-To define "complete", we analyzed **60 real TouchDesigner projects (28,698 nodes, 2022–2026)** from a daily-practice generative art portfolio and crawled the **official operator inventory (~675 operators across 7 families)**. Two documents drive the evolution: **[docs/ROADMAP.md](docs/ROADMAP.md)** (phased plan with measured results — corpus coverage: 32.3% → 47.1% → **62.3%** across two measured evolution cycles, the second being the full 3D pipeline) and **[docs/TD-PARITY.md](docs/TD-PARITY.md)** (the full parity charter: per-family op tiers, portable vs web-equivalent vs native-only classification, and the engine-concept gaps — time slicing, audio, 3D, GLSL, POPs, panels — with the standing measure→pick→implement→verify loop).
+To define "complete", we analyzed **60 real TouchDesigner projects (28,698 nodes, 2022–2026)** from a daily-practice generative art portfolio and crawled the **official operator inventory (~675 operators across 7 families)**. Two documents drive the evolution: **[docs/ROADMAP.md](docs/ROADMAP.md)** (phased plan with measured results — corpus coverage: 32.3% → 47.1% → **62.3%** across two measured evolution cycles, the second being the full 3D pipeline) and **[docs/TD-PARITY.md](docs/TD-PARITY.md)** (the full parity charter: per-family op tiers, portable vs web-equivalent vs native-only classification, and the engine-concept gaps — time slicing, audio, 3D, GLSL, POPs, panels — with the standing measure → pick → implement → verify loop).
 
 ## Sister project: open-audiovisual
 
-[**open-audiovisual**](https://github.com/frank890417/open-audiovisual) is a
-web-native framework for audiovisual *performance* — MIDI/chord/pose inputs, a
-signal-to-parameter mapping layer, a timeline with scenes and cues, and a
-backstage monitor. The two are halves of one stack: **WebToe is the engine,
-open-audiovisual is the show.** A WebToe network can be performed as an openav
-World, and openav's named signals map naturally onto CHOP channels. Site:
-[openaudiovisual.com](https://openaudiovisual.com).
+[**open-audiovisual**](https://github.com/frank890417/open-audiovisual) is a web-native framework for audiovisual *performance* — MIDI/chord/pose inputs, a signal-to-parameter mapping layer, a timeline with scenes and cues, and a backstage monitor. The two are halves of one stack: **WebToe is the engine, open-audiovisual is the show.** Its `world-webtoe` adapter embeds the editor and drives patch expressions through `ext()`, and openav's named signals map naturally onto CHOP channels. Site: [openaudiovisual.com](https://openaudiovisual.com) · [the WebToe page there](https://openaudiovisual.com/webtoe/).
 
 ## NDI In/Out
 

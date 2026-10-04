@@ -6,8 +6,8 @@
  *   npm run dev          # in one shell (port 8643)
  *   node tools/capture-screens.mjs
  *
- * Headless tabs pause requestAnimationFrame, so frames are driven manually
- * through the `__webtoe` debug handle.
+ * Frames run on the real clock (new headless Chrome runs requestAnimationFrame),
+ * so the HUD shows the true display fps and cook rate — no manual frame driving.
  */
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -23,10 +23,9 @@ const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, de
 
 async function boot(url) {
   await page.goto(url, { waitUntil: 'load' });
-  await page.waitForFunction(() => !!window.__webtoe, null, { timeout: 20000 });
+  await page.waitForFunction(() => !!window.__webtoe?.engine?.gpu, null, { timeout: 20000 });
+  await page.waitForTimeout(800);
 }
-
-const drive = (n) => page.evaluate((k) => { for (let i = 0; i < k; i++) window.__webtoe.loop(); }, n);
 
 async function loadExample(optionIndex) {
   await page.evaluate((idx) => {
@@ -34,21 +33,11 @@ async function loadExample(optionIndex) {
     s.value = s.options[idx].value;
     s.dispatchEvent(new Event('change', { bubbles: true }));
   }, optionIndex);
-  await page.waitForTimeout(700);
-  await drive(20);
+  await page.waitForTimeout(1500);
 }
 
 async function shot(name) {
-  await drive(25);            // settle thumbs (async readback needs a kick cycle)
-  await page.waitForTimeout(250);
-  // settle the fps meter with realtime-spaced frames (manual driving inflates it)
-  await page.evaluate(() => new Promise((res) => {
-    let i = 0;
-    const id = setInterval(() => {
-      window.__webtoe.loop();
-      if (++i >= 160) { clearInterval(id); res(); }
-    }, 16);
-  }));
+  await page.waitForTimeout(2500); // thumbnails, backdrop readback and the fps meter settle in real time
   await page.screenshot({ path: join(OUT, name) });
   console.log('wrote', name);
 }
@@ -56,68 +45,55 @@ async function shot(name) {
 // 1) hero — lfo garden on webgl2
 await boot(BASE);
 await loadExample(3);
-await drive(60);
 await shot('hero-lfo-garden.png');
 
-// 2) feedback trails with a mouse orbit
+// 2) feedback trails with a mouse orbit, in real time
 await loadExample(2);
-await page.evaluate(() => {
+await page.evaluate(() => new Promise((res) => {
   const v = document.querySelector('.wt-viewer');
   const r = v.getBoundingClientRect();
-  for (let i = 0; i < 150; i++) {
+  let i = 0;
+  const id = setInterval(() => {
     const a = (i / 50) * Math.PI * 2;
     v.dispatchEvent(new PointerEvent('pointermove', {
       bubbles: true,
       clientX: r.left + r.width / 2 + Math.cos(a) * r.width * 0.3,
       clientY: r.top + r.height / 2 + Math.sin(a) * r.height * 0.3,
     }));
-    window.__webtoe.loop();
-  }
-});
-await shot('feedback-trails.png');
+    if (++i >= 150) { clearInterval(id); res(); }
+  }, 16);
+}));
+await page.screenshot({ path: join(OUT, 'feedback-trails.png') });
+console.log('wrote feedback-trails.png');
 
 // 3) chop scope — select merge1 in the playground
 await loadExample(5);
-await drive(150);
 await page.evaluate(() => {
   const m = [...document.querySelectorAll('.wt-node')].find(
     (n) => n.querySelector('.wt-label')?.textContent === 'merge1');
   m.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 });
-await drive(120);
 await shot('chop-scope.png');
 
 // 4) palette over the starter patch
 await boot(BASE);
-await drive(40);
 await page.evaluate(() => {
   const net = document.querySelector('.wt-net');
   net.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 640, clientY: 430 }));
 });
-await page.waitForTimeout(200);
 await shot('palette.png');
 
-// 5) import report dialog — the real dialog with real measured numbers from a
-//    213-node production import (see WORKLOG 2026-06-11)
-await page.evaluate(() => {
-  document.querySelector('.wt-palette')?.remove();
-  window.__webtoe.showReport({
-    nodesTotal: 213, nodesMapped: 71, nodesStubbed: 142,
-    exprTranslated: 9, exprDisabled: 14,
-    notes: [
-      'stubbed op types: POP:merge×12, POP:circle×9, POP:primitive×9, POP:tube×9, TOP:switch×8, …',
-      '7 cross-network or unresolved wires skipped (v1 limitation)',
-    ],
-  });
-});
+// 5) import report — a real native decode of a raw TouchDesigner file (example 12,
+//    saved by TD 2021.16410): the dialog the editor shows, nothing staged
+await boot(BASE);
+await loadExample(12);
 await shot('import-report.png');
 
-// 6) webgpu backend
+// 6) webgpu backend — hello noise renders identically on both backends
+//    (example 03's ramps hit a WGSL uniform-order bug on WebGPU; tracked in TD-PARITY)
 await boot(BASE + '?backend=webgpu');
-await loadExample(3);
-await drive(80);
-await page.waitForTimeout(300);
+await loadExample(1);
 await shot('webgpu.png');
 
 await browser.close();
