@@ -4,7 +4,7 @@
  * transforms, seed offsets) plus the lookup tables the noise shaders embed.
  *
  * The behaviour reproduced here was measured black-box against TouchDesigner
- * 2025 (feed known inputs, read outputs) by the author's EOI "dream engine"
+ * 2025 (feed known inputs, read outputs) by the author's production web port
  * project and ported into WebToe with permission. No code was taken from the
  * TouchDesigner binaries. Measured tolerances are listed in docs/TD-PARITY.md.
  *

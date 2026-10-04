@@ -6,8 +6,8 @@ here and in the headers of the files that carry them. The shader strings that
 ship to the browser keep the notices inline as well.
 
 The TouchDesigner-faithful TOP behaviour (Level, Edge, Monochrome, Ramp, Blur,
-Noise, Composite) was measured black-box against TouchDesigner by the author's
-own EOI "dream engine" project and ported here by the author. No code or data
+Noise, Composite) was measured black-box against TouchDesigner in the author's
+own production web port of two TouchDesigner shows, and ported here by the author. No code or data
 was extracted from TouchDesigner itself.
 
 ---

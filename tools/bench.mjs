@@ -13,7 +13,7 @@
  *   heapMB     JS heap growth over the window (allocation pressure)
  *   skipped    steps skipped by resyncs
  * One JSON line per project, so runs can be diffed and charted.
- * Modeled on the EOI engine's scene-shots / fps probes.
+ * Modeled on the probes of the author's production web port.
  */
 import { chromium } from 'playwright-core';
 

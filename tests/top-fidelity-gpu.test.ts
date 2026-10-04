@@ -9,7 +9,7 @@
  *
  * Tolerances account for 8-bit render targets (±0.5/255 per write), GPU
  * float32 vs double references, and the 8-bit bilinear weights of GPU
- * texture filtering (the same effect EOI measured on TD's side).
+ * texture filtering (the same effect measured on TD's side).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Browser, Page } from 'playwright-core';

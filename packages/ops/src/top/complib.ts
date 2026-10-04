@@ -5,8 +5,8 @@
  * 37 operations reproduce reference implementations that were verified
  * against TouchDesigner outputs (four input sets, ≤1e-7); 9 (burncolor,
  * chromadifference, color, divide, freeze, hue, luminancedifference, yfilm,
- * zfilm) were fitted to the same data (≤3e-5). Measured by the author's EOI
- * dream-engine research, ported with permission; see docs/TD-PARITY.md.
+ * zfilm) were fitted to the same data (≤3e-5). Measured in the author's
+ * production web port of TouchDesigner shows; see docs/TD-PARITY.md.
  *
  * The "blend mode" group (overlay, hardlight, softlight, darker/lighter
  * colour, burnlinear, linearlight, pinlight, hardmix, vividlight, inverse,

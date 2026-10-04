@@ -41,8 +41,9 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
   var o: VOut;
   o.pos = vec4f(p[i], 0.0, 1.0);
+  // targets hold WebGL's row order (row 0 = uv.y 0), so the top of the
+  // canvas samples uv.y = 1 — no flip here
   o.uv = p[i] * 0.5 + 0.5;
-  o.uv.y = 1.0 - o.uv.y;
   return o;
 }
 @fragment fn fs(in: VOut) -> @location(0) vec4f {
@@ -63,7 +64,12 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
   var o: VOut;
   o.pos = vec4f(p[i], 0.0, 1.0);
-  o.uv = p[i] * 0.5 + 0.5;
+  // WebGPU's framebuffer row 0 is the top (NDC y = +1); WebGL's is the bottom.
+  // Writing uv.y = 0 into row 0 keeps every target in WebGL's row order, so a
+  // pass that samples its input at uv reads the same texel on both backends
+  // (otherwise each input sample flips the image and odd chains look mirrored),
+  // and @builtin(position) matches gl_FragCoord texel for texel.
+  o.uv = vec2f(p[i].x * 0.5 + 0.5, 0.5 - p[i].y * 0.5);
   return o;
 }`;
 

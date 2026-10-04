@@ -7,7 +7,7 @@
  *
  * Each job compares TD's float32 output with the CPU reference of the same
  * formula (top-fidelity-ref.ts) on TD's own float32 input. Tolerances follow
- * what the EOI research measured (docs/TD-PARITY.md "Fidelity"). TD's float
+ * what the production-port research measured (docs/TD-PARITY.md "Fidelity"). TD's float
  * inputs are not clamped by Level's automatic mode, so the Level reference
  * runs with clampinput off here (WebToe's 8-bit pipeline always clamps).
  */

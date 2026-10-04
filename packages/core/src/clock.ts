@@ -20,7 +20,8 @@
  * up, it runs one step per frame; more than `resyncSec` behind (a hidden tab,
  * a long stall), it skips ahead instead of replaying.
  *
- * Ported from the author's EOI dream-engine cook clock (fixed-step core and
+ * Ported from the cook clock of the author's production web port of two
+ * TouchDesigner shows (fixed-step core and
  * cost model; show anchoring and start-up replay are not needed here).
  */
 

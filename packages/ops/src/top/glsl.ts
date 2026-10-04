@@ -3,7 +3,7 @@
  *
  * Most shaders are written fresh for WebToe. The TouchDesigner-faithful ones
  * (level, edge, monochrome, ramp, blur, noise, composite) reproduce behaviour
- * measured black-box against TouchDesigner by the author's EOI project (ported
+ * measured black-box against TouchDesigner by the author's production web port (ported
  * with permission; see docs/TD-PARITY.md "Fidelity"). Third-party algorithm
  * code (Gustavson noise, Hocevar HSV, Hoskins hash) lives in noiselib.ts /
  * complib.ts with its notices; see THIRD_PARTY_NOTICES.md.

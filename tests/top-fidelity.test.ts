@@ -1,8 +1,8 @@
 /**
  * TouchDesigner-fidelity tests for the TOP family.
  *
- * Numbers come from measured TD behaviour documented by the author's EOI
- * dream-engine research (docs/TD-PARITY.md "Fidelity"): the CPU references in
+ * Numbers come from measured TD behaviour documented by the author's production
+ * web-port research (docs/TD-PARITY.md "Fidelity"): the CPU references in
  * top-fidelity-ref.ts mirror the shaders, these tests pin the rules (order of
  * operations, formulas, constants) and check the GLSL/WGSL sources implement
  * the same thing. GPU-vs-reference pixel checks: top-fidelity-gpu.test.ts.

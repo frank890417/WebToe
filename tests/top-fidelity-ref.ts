@@ -1,7 +1,7 @@
 /**
  * CPU reference implementations of the TouchDesigner-faithful TOP formulas
  * (double precision, line-for-line with the shaders in packages/ops/src/top).
- * Ported from the author's EOI dream-engine `ref.js` (with permission) — the
+ * Ported from the CPU references (`ref.js`) of the author's production web port — the
  * same mirrors that were checked against TouchDesigner outputs there.
  * Used by top-fidelity*.test.ts and td-golden.test.ts.
  *
