@@ -273,6 +273,60 @@ export class WebGL2Backend implements GpuFacade {
     return new Uint8ClampedArray(out.buffer);
   }
 
+  private readback: { w: number; h: number; tex: WebGLTexture; fbo: WebGLFramebuffer; pbo: WebGLBuffer } | null = null;
+  private readbackBusy = false;
+
+  readPixelsAsync(tex: TextureHandle, w: number, h: number): Promise<Uint8ClampedArray> | null {
+    if (this.readbackBusy) return null;
+    const gl = this.gl;
+    let rb = this.readback;
+    if (!rb || rb.w !== w || rb.h !== h) {
+      if (rb) { gl.deleteTexture(rb.tex); gl.deleteFramebuffer(rb.fbo); gl.deleteBuffer(rb.pbo); }
+      const pbo = gl.createBuffer()!;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, w * h * 4, gl.STREAM_READ);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      rb = this.readback = { w, h, tex: this.makeTexture(w, h), fbo: gl.createFramebuffer()!, pbo };
+    }
+    // downscale into the scratch target, then queue the copy into the PBO
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rb.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rb.tex, 0);
+    gl.viewport(0, 0, w, h);
+    const prog = this.program('__blit');
+    gl.useProgram(prog.prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.textures.get(tex.id) ?? null);
+    const loc = this.loc(prog, 'u_tex0');
+    if (loc) gl.uniform1i(loc, 0);
+    const oloc = this.loc(prog, 'u_opacity');
+    if (oloc) gl.uniform1f(oloc, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, rb.pbo);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    if (!sync) return null;
+    this.readbackBusy = true;
+    const target = rb;
+    return new Promise((resolve, reject) => {
+      const poll = () => {
+        const st = gl.clientWaitSync(sync, 0, 0);
+        if (st === gl.TIMEOUT_EXPIRED) { setTimeout(poll, 4); return; }
+        gl.deleteSync(sync);
+        this.readbackBusy = false;
+        if (st === gl.WAIT_FAILED) { reject(new Error('readback fence failed')); return; }
+        const out = new Uint8Array(target.w * target.h * 4);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, target.pbo);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        resolve(new Uint8ClampedArray(out.buffer));
+      };
+      setTimeout(poll, 0);
+    });
+  }
+
   releaseNode(node: NodeInst): void {
     const gl = this.gl;
     for (const [key, t] of this.targets) {

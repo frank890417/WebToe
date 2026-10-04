@@ -65,6 +65,9 @@ export interface GpuFacade {
   blitToCanvas(tex: TextureHandle, rect?: BlitRect): void;
   /** Read back a small RGBA8 thumbnail (perf: throttled by caller). */
   readPixels(tex: TextureHandle, w: number, h: number): Uint8ClampedArray;
+  /** Non-blocking readback (PBO + fence on WebGL2): resolves when the GPU is
+   *  done, never stalls the pipeline. Returns null while one is in flight. */
+  readPixelsAsync?(tex: TextureHandle, w: number, h: number): Promise<Uint8ClampedArray> | null;
   /** Render a 3D scene into the node's pooled target (depth-buffered).
    *  Backends may not support it (v1: WebGL2 only) — they throw a clear error
    *  the engine surfaces as a node error badge. */

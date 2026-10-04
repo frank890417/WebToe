@@ -260,8 +260,9 @@ export class EditorApp {
 
   /**
    * TouchDesigner-style backdrop: the current output behind the whole network.
-   * Uses a CPU readback at a low rate (a few Hz) — cheap at this size, and the
-   * only way to get pixels *underneath* the node DOM.
+   * Uses a CPU readback at a low rate (a few Hz) — the only way to get pixels
+   * *underneath* the node DOM. Non-blocking where the backend supports it
+   * (PBO + fence), so the backdrop never stalls the GPU pipeline.
    */
   private paintBackdrop(
     target: NodeInst | null,
@@ -283,9 +284,20 @@ export class EditorApp {
     const tex = texFor(target, target.output);
     if (!tex) { ctx.clearRect(0, 0, w, h); return; }
     const sw = 320, sh = Math.max(1, Math.round(sw * (tex.height / Math.max(1, tex.width))));
+    const gpu = this.engine.gpu!;
+    if (gpu.readPixelsAsync) {
+      const pending = gpu.readPixelsAsync(tex, sw, sh);
+      pending?.then((px) => this.drawBackdrop(px, sw, sh, w, h)).catch(() => {});
+      return;
+    }
     let px: Uint8ClampedArray;
-    try { px = this.engine.gpu!.readPixels(tex, sw, sh); } catch { return; }
+    try { px = gpu.readPixels(tex, sw, sh); } catch { return; }
+    this.drawBackdrop(px, sw, sh, w, h);
+  }
 
+  private drawBackdrop(px: Uint8ClampedArray, sw: number, sh: number, w: number, h: number): void {
+    const ctx = this.backdropCtx;
+    if (!ctx || !this.backdrop) return;
     // GL readback is bottom-up — flip rows into the scratch canvas
     const src = this.backdropSrc;
     if (src.width !== sw || src.height !== sh) { src.width = sw; src.height = sh; }
