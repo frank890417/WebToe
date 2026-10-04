@@ -20,7 +20,8 @@
     "preview": "npm run preview -w apps/web",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run typecheck && npm run test",
+    "bench": "node tools/bench.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
